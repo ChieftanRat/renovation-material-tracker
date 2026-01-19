@@ -14,6 +14,7 @@ CREATE TABLE tasks (
   name TEXT NOT NULL,
   start_datetime TEXT NOT NULL,
   end_datetime TEXT NOT NULL,
+  CHECK (julianday(end_datetime) > julianday(start_datetime)),
   FOREIGN KEY (project_id) REFERENCES projects(id)
 );
 
@@ -53,7 +54,17 @@ CREATE TABLE work_sessions (
   work_date TEXT NOT NULL,
   clock_in_time TEXT NOT NULL,
   clock_out_time TEXT NOT NULL,
+  CHECK (
+    julianday(work_date || ' ' || clock_out_time) >
+    julianday(work_date || ' ' || clock_in_time)
+  ),
   FOREIGN KEY (laborer_id) REFERENCES laborers(id),
   FOREIGN KEY (project_id) REFERENCES projects(id),
   FOREIGN KEY (task_id) REFERENCES tasks(id)
 );
+
+CREATE INDEX idx_tasks_project_id ON tasks(project_id);
+CREATE INDEX idx_material_purchases_project_id ON material_purchases(project_id);
+CREATE INDEX idx_material_purchases_vendor_id ON material_purchases(vendor_id);
+CREATE INDEX idx_work_sessions_project_id ON work_sessions(project_id);
+CREATE INDEX idx_work_sessions_laborer_id ON work_sessions(laborer_id);
