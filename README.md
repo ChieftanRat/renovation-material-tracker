@@ -10,8 +10,24 @@ The initial schema lives in [`schema.sql`](schema.sql) and targets SQLite-compat
 sqlite3 renovation.db < schema.sql
 ```
 
+## Seed Data
+
+Reference data lives in [`seed.sql`](seed.sql). After creating the schema:
+
+```sh
+sqlite3 renovation.db < seed.sql
+```
+
+## Reports and Queries
+
+Reference report queries live in [`reports.sql`](reports.sql). You can run them in a SQLite shell:
+
+```sh
+sqlite3 renovation.db
+.read reports.sql
+```
+
 ## Next Steps
 
-- Add seed data and reference queries for reports.
 - Implement application services (API or CLI) to capture entries.
-- Build report queries for materials, labor, task analytics, and estimates.
+- Build exports and dashboards for materials, labor, task analytics, and estimates.
