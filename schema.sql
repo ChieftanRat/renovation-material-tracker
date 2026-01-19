@@ -31,7 +31,7 @@ CREATE TABLE material_purchases (
   material_description TEXT NOT NULL,
   unit_cost REAL NOT NULL CHECK (unit_cost >= 0),
   quantity REAL NOT NULL CHECK (quantity >= 0),
-  total_material_cost REAL NOT NULL CHECK (total_material_cost >= 0),
+  total_material_cost REAL NOT NULL DEFAULT 0 CHECK (total_material_cost >= 0),
   delivery_cost REAL DEFAULT 0 CHECK (delivery_cost >= 0),
   purchase_date TEXT NOT NULL,
   FOREIGN KEY (project_id) REFERENCES projects(id),
@@ -68,3 +68,20 @@ CREATE INDEX idx_material_purchases_project_id ON material_purchases(project_id)
 CREATE INDEX idx_material_purchases_vendor_id ON material_purchases(vendor_id);
 CREATE INDEX idx_work_sessions_project_id ON work_sessions(project_id);
 CREATE INDEX idx_work_sessions_laborer_id ON work_sessions(laborer_id);
+
+CREATE TRIGGER material_purchases_total_cost_insert
+AFTER INSERT ON material_purchases
+BEGIN
+  UPDATE material_purchases
+  SET total_material_cost = unit_cost * quantity
+  WHERE id = NEW.id;
+END;
+
+CREATE TRIGGER material_purchases_total_cost_update
+AFTER UPDATE OF unit_cost, quantity, total_material_cost ON material_purchases
+WHEN NEW.total_material_cost != (NEW.unit_cost * NEW.quantity)
+BEGIN
+  UPDATE material_purchases
+  SET total_material_cost = unit_cost * quantity
+  WHERE id = NEW.id;
+END;
