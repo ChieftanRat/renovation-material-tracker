@@ -17,6 +17,8 @@ SELECT
 FROM material_purchases mp
 JOIN projects p ON p.id = mp.project_id
 WHERE mp.purchase_date BETWEEN :start_date AND :end_date
+  AND mp.archived_at IS NULL
+  AND p.archived_at IS NULL
 GROUP BY p.id, p.name
 ORDER BY total_material_spend DESC;
 
@@ -28,6 +30,8 @@ SELECT
 FROM material_purchases mp
 JOIN vendors v ON v.id = mp.vendor_id
 WHERE mp.purchase_date BETWEEN :start_date AND :end_date
+  AND mp.archived_at IS NULL
+  AND v.archived_at IS NULL
 GROUP BY v.id, v.name
 ORDER BY vendor_spend DESC;
 
@@ -35,24 +39,27 @@ ORDER BY vendor_spend DESC;
 SELECT
   l.id AS laborer_id,
   l.name AS laborer_name,
-  COUNT(ws.id) AS work_sessions,
+  COUNT(wse.id) AS work_entries,
   ROUND(SUM(
-    (julianday(ws.work_date || ' ' || ws.clock_out_time) -
-     julianday(ws.work_date || ' ' || ws.clock_in_time)) * 24
+    (julianday('2000-01-01 ' || wse.clock_out_time) -
+     julianday('2000-01-01 ' || wse.clock_in_time)) * 24
   ), 2) AS hours_worked,
   ROUND(SUM(
     CASE
       WHEN l.hourly_rate IS NOT NULL THEN
-        (julianday(ws.work_date || ' ' || ws.clock_out_time) -
-         julianday(ws.work_date || ' ' || ws.clock_in_time)) * 24 * l.hourly_rate
+        (julianday('2000-01-01 ' || wse.clock_out_time) -
+         julianday('2000-01-01 ' || wse.clock_in_time)) * 24 * l.hourly_rate
       WHEN l.daily_rate IS NOT NULL THEN
         l.daily_rate
       ELSE 0
     END
   ), 2) AS gross_pay
-FROM work_sessions ws
-JOIN laborers l ON l.id = ws.laborer_id
+FROM work_session_entries wse
+JOIN work_sessions ws ON ws.id = wse.work_session_id
+JOIN laborers l ON l.id = wse.laborer_id
 WHERE ws.work_date BETWEEN :start_date AND :end_date
+  AND ws.archived_at IS NULL
+  AND l.archived_at IS NULL
 GROUP BY l.id, l.name
 ORDER BY gross_pay DESC;
 
@@ -63,17 +70,21 @@ SELECT
   ROUND(SUM(
     CASE
       WHEN l.hourly_rate IS NOT NULL THEN
-        (julianday(ws.work_date || ' ' || ws.clock_out_time) -
-         julianday(ws.work_date || ' ' || ws.clock_in_time)) * 24 * l.hourly_rate
+        (julianday('2000-01-01 ' || wse.clock_out_time) -
+         julianday('2000-01-01 ' || wse.clock_in_time)) * 24 * l.hourly_rate
       WHEN l.daily_rate IS NOT NULL THEN
         l.daily_rate
       ELSE 0
     END
   ), 2) AS labor_cost
-FROM work_sessions ws
-JOIN laborers l ON l.id = ws.laborer_id
+FROM work_session_entries wse
+JOIN work_sessions ws ON ws.id = wse.work_session_id
+JOIN laborers l ON l.id = wse.laborer_id
 JOIN projects p ON p.id = ws.project_id
 WHERE ws.work_date BETWEEN :start_date AND :end_date
+  AND ws.archived_at IS NULL
+  AND l.archived_at IS NULL
+  AND p.archived_at IS NULL
 GROUP BY p.id, p.name
 ORDER BY labor_cost DESC;
 
@@ -83,6 +94,7 @@ SELECT
   ROUND(AVG((julianday(t.end_datetime) - julianday(t.start_datetime)) * 24), 2) AS avg_hours
 FROM tasks t
 WHERE date(t.start_datetime) BETWEEN :start_date AND :end_date
+  AND t.archived_at IS NULL
 GROUP BY t.name
 ORDER BY avg_hours DESC;
 
@@ -94,5 +106,6 @@ SELECT
   ROUND(AVG(mp.delivery_cost), 2) AS avg_delivery_cost
 FROM material_purchases mp
 WHERE mp.purchase_date BETWEEN :start_date AND :end_date
+  AND mp.archived_at IS NULL
 GROUP BY mp.material_description
 ORDER BY mp.material_description;

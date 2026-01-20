@@ -1,0 +1,155 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Renovation Material Tracker</title>
+    <link rel="stylesheet" href="/static/styles.css" />
+  </head>
+  <body>
+    <div class="bg-shape shape-one"></div>
+    <div class="bg-shape shape-two"></div>
+    <header class="topbar">
+      <div class="topbar-left">
+        <span class="pill">Live API</span>
+        <span class="pill muted">v0.2</span>
+        <h1>Renovation Material Tracker</h1>
+      </div>
+      <div class="topbar-right">
+        <div>
+          <span class="label">Server</span>
+          <span class="value" id="server-base"></span>
+        </div>
+      </div>
+    </header>
+
+    <main class="app">
+      <aside class="sidebar">
+        <div class="sidebar-header">
+          <div>
+            <h2>Projects</h2>
+            <p class="muted">Select a project to view details.</p>
+          </div>
+          <button class="btn primary" id="project-add">Add</button>
+        </div>
+        <div class="sidebar-search">
+          <input type="text" id="project-search" placeholder="Search projects" />
+        </div>
+        <div id="project-list" class="project-list"></div>
+        <div class="sidebar-footer">
+          <button class="btn ghost manage-button" id="manage-entities">
+            <span class="manage-icon" aria-hidden="true">
+              <svg viewBox="0 0 24 24" focusable="false">
+                <circle cx="12" cy="12" r="9" fill="none" stroke="currentColor" stroke-width="1.6" />
+                <path
+                  d="M12 7.5v4.5l3 1.8"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-width="1.6"
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                />
+              </svg>
+            </span>
+            Manage vendors & labor
+          </button>
+        </div>
+      </aside>
+
+      <section class="main">
+        <div class="main-header">
+          <div>
+            <div class="breadcrumb" id="breadcrumb">Projects</div>
+            <h2 id="project-title">Select a project</h2>
+            <p class="muted" id="project-meta">
+              Tasks, purchases, and sessions follow the selected project.
+            </p>
+            <div class="guidance muted" id="project-guidance"></div>
+          </div>
+          <div class="main-actions">
+            <button class="btn ghost" id="project-edit">Edit project</button>
+            <button class="btn ghost" id="project-archive">Archive</button>
+            <button class="btn ghost" id="project-delete">Delete</button>
+            <button class="btn ghost" id="backup-now">Backup now</button>
+            <button class="btn ghost" id="refresh-all">Refresh</button>
+          </div>
+        </div>
+
+        <section class="summary-strip">
+          <div>
+            <span class="label">Total materials (so far)</span>
+            <span class="value" id="total-materials">-</span>
+          </div>
+          <div>
+            <span class="label">Total labor (so far)</span>
+            <span class="value" id="total-labor">-</span>
+          </div>
+          <div>
+            <span class="label">Combined total (so far)</span>
+            <span class="value" id="total-combined">-</span>
+          </div>
+          <div class="progress" id="progress-strip"></div>
+        </section>
+
+        <div id="tabs" class="tabs"></div>
+        <section class="panel">
+          <div class="panel-toolbar">
+            <div class="panel-actions">
+              <button class="btn ghost" id="filter-toggle">Filters</button>
+              <button class="btn primary" id="add-toggle">Add new</button>
+            </div>
+            <div class="panel-pagination">
+              <label>
+                Page
+                <input type="number" id="page-input" min="1" value="1" />
+              </label>
+              <label>
+                Page size
+                <input type="number" id="page-size-input" min="1" value="25" />
+              </label>
+              <button class="btn ghost" id="page-apply">Apply</button>
+            </div>
+          </div>
+
+          <div id="filter-panel" class="panel-filters hidden"></div>
+          <div id="table-meta" class="panel-meta muted">Waiting for input.</div>
+          <div id="table-wrap" class="table-wrap"></div>
+        </section>
+      </section>
+    </main>
+
+    <div id="modal" class="modal hidden" aria-hidden="true">
+      <div class="modal-card">
+        <div class="modal-header">
+          <h3 id="modal-title">Add new</h3>
+          <button class="btn ghost" id="modal-close">Close</button>
+        </div>
+        <div id="modal-body" class="modal-body"></div>
+        <div class="modal-actions">
+          <button class="btn ghost" id="modal-cancel">Cancel</button>
+          <button class="btn primary" id="modal-save">Save</button>
+        </div>
+        <div id="modal-status" class="modal-status muted"></div>
+      </div>
+    </div>
+
+    <div id="manage-modal" class="modal hidden" aria-hidden="true">
+      <div class="modal-card manage-card">
+        <div class="modal-header">
+          <h3>Manage vendors & labor</h3>
+          <button class="btn ghost" id="manage-close">Close</button>
+        </div>
+        <div class="manage-tabs">
+          <button class="tab active" data-manage="vendors">Vendors</button>
+          <button class="tab" data-manage="laborers">Laborers</button>
+        </div>
+        <div id="manage-body" class="modal-body"></div>
+        <div id="manage-status" class="modal-status muted"></div>
+      </div>
+    </div>
+
+    <div id="toast-container" class="toast-container"></div>
+
+    <script src="/static/app.js"></script>
+  </body>
+</html>

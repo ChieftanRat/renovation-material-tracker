@@ -38,6 +38,8 @@ python api.py
 Environment variables:
 - `RENOVATION_DB` to point at a different SQLite file.
 - `PORT` to change the listening port (default 8000).
+- `RENOVATION_BACKUPS` to set the backup folder (default `backups/`).
+- `RENOVATION_BACKUP_RETENTION_DAYS` to set how long backups are kept (default 30 days).
 
 Example requests:
 
@@ -57,3 +59,29 @@ curl -X POST http://localhost:8000/material-purchases ^
 
 - Expand the API with read endpoints and pagination.
 - Build exports and dashboards for materials, labor, task analytics, and estimates.
+
+## Backup Export
+
+Use `backup_export.py` to export a SQL backup. By default, it excludes seeded data
+from `seed.sql` and only exports user-entered rows.
+
+```sh
+py backup_export.py
+```
+
+Optional flags:
+- `--db` to point at a different SQLite file.
+- `--out` to choose an output path.
+- `--include-seed` to include seeded data.
+
+## Backup Restore
+
+Apply a backup SQL file to the database:
+
+```sh
+py backup_restore.py --backup backups/backup_YYYYMMDD_HHMMSS.sql
+```
+
+Optional flags:
+- `--db` to point at a different SQLite file.
+- `--yes` to skip the confirmation prompt.

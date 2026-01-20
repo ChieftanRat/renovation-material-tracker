@@ -41,16 +41,21 @@ VALUES
   ('Lucia Perez', 28.00, NULL),
   ('Team Zenith', NULL, 420.00);
 
-INSERT INTO work_sessions (
+INSERT INTO work_sessions (project_id, task_id, work_date)
+VALUES
+  (1, 1, '2025-01-06'),
+  (1, 2, '2025-01-12'),
+  (2, 3, '2025-02-16'),
+  (2, 4, '2025-02-19');
+
+INSERT INTO work_session_entries (
+  work_session_id,
   laborer_id,
-  project_id,
-  task_id,
-  work_date,
   clock_in_time,
   clock_out_time
 )
 VALUES
-  (1, 1, 1, '2025-01-06', '08:05', '16:45'),
-  (2, 1, 2, '2025-01-12', '09:10', '16:20'),
-  (3, 2, 3, '2025-02-16', '08:30', '15:30'),
-  (1, 2, 4, '2025-02-19', '09:00', '18:00');
+  (1, 1, '08:05', '16:45'),
+  (2, 2, '09:10', '16:20'),
+  (3, 3, '08:30', '15:30'),
+  (4, 1, '09:00', '18:00');
