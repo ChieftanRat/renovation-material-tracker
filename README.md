@@ -37,9 +37,12 @@ python api.py
 
 Environment variables:
 - `RENOVATION_DB` to point at a different SQLite file.
+- `HOST` to control the bind address (defaults to `127.0.0.1`). Use `HOST=0.0.0.0` to expose the API outside the local machine (for example, inside containers).
 - `PORT` to change the listening port (default 8000).
 - `LOG_LEVEL` to control logging verbosity (defaults to `INFO`).
 - `RENOVATION_API_KEY` to require an API key or bearer token for POST requests.
+
+For production deployments, set `HOST=0.0.0.0` (or an explicit interface) only when you intend to expose the service, and keep it behind a reverse proxy or firewall. The default `127.0.0.1` bind keeps the API limited to local requests for safer development by default.
 
 Example requests:
 

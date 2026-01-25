@@ -465,9 +465,10 @@ class RenovationHandler(BaseHTTPRequestHandler):
 
 
 def run():
+    host = os.environ.get("HOST", "127.0.0.1")
     port = int(os.environ.get("PORT", "8000"))
-    server = ThreadingHTTPServer(("0.0.0.0", port), RenovationHandler)
-    print(f"API listening on http://localhost:{port}")
+    server = ThreadingHTTPServer((host, port), RenovationHandler)
+    print(f"API listening on http://{host}:{port}")
     server.serve_forever()
 
 
