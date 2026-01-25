@@ -4,9 +4,11 @@ import os
 import sqlite3
 from datetime import date, datetime, time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from urllib.parse import parse_qs, urlparse
 
 
 DB_PATH = os.environ.get("RENOVATION_DB", "renovation.db")
+API_AUTH_SECRET = os.environ.get("RENOVATION_API_KEY")
 LOG_LEVEL = os.environ.get("LOG_LEVEL", "INFO").upper()
 logging.basicConfig(
     level=getattr(logging, LOG_LEVEL, logging.INFO),
@@ -43,6 +45,25 @@ def send_json(handler, status, payload):
     handler.end_headers()
     handler.wfile.write(body)
     LOGGER.info("%s %s -> %s", handler.command, handler.path, status)
+
+
+def require_auth(handler):
+    if not API_AUTH_SECRET:
+        LOGGER.error("RENOVATION_API_KEY is not configured.")
+        send_json(handler, 403, {"error": "API key not configured."})
+        return False
+    api_key = handler.headers.get("X-API-Key")
+    auth_header = handler.headers.get("Authorization", "")
+    bearer = None
+    if auth_header.lower().startswith("bearer "):
+        bearer = auth_header[7:].strip()
+    if not api_key and not bearer:
+        send_json(handler, 401, {"error": "Authentication required."})
+        return False
+    if api_key == API_AUTH_SECRET or bearer == API_AUTH_SECRET:
+        return True
+    send_json(handler, 403, {"error": "Invalid credentials."})
+    return False
 
 
 def require_fields(data, fields):
@@ -152,6 +173,8 @@ class RenovationHandler(BaseHTTPRequestHandler):
         handler = routes.get(self.path)
         if not handler:
             send_json(self, 404, {"error": "Not found."})
+            return
+        if not require_auth(self):
             return
         data, error = read_json(self)
         if error:

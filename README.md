@@ -39,18 +39,21 @@ Environment variables:
 - `RENOVATION_DB` to point at a different SQLite file.
 - `PORT` to change the listening port (default 8000).
 - `LOG_LEVEL` to control logging verbosity (defaults to `INFO`).
+- `RENOVATION_API_KEY` to require an API key or bearer token for POST requests.
 
 Example requests:
 
 ```sh
 curl -X POST http://localhost:8000/projects ^
   -H "Content-Type: application/json" ^
+  -H "X-API-Key: your-secret-key" ^
   -d "{\"name\":\"Kitchen Refresh\",\"start_date\":\"2025-01-05\"}"
 ```
 
 ```sh
 curl -X POST http://localhost:8000/material-purchases ^
   -H "Content-Type: application/json" ^
+  -H "Authorization: Bearer your-secret-key" ^
   -d "{\"project_id\":1,\"vendor_id\":1,\"material_description\":\"Tile\",\"unit_cost\":2.4,\"quantity\":180,\"delivery_cost\":45,\"purchase_date\":\"2025-01-11\"}"
 ```
 

@@ -17,7 +17,9 @@ class ApiTestCase(unittest.TestCase):
         self.temp_dir = tempfile.TemporaryDirectory()
         self.db_path = os.path.join(self.temp_dir.name, "renovation.db")
         os.environ["RENOVATION_DB"] = self.db_path
+        os.environ["RENOVATION_API_KEY"] = "test-api-key"
         api.DB_PATH = self.db_path
+        api.API_AUTH_SECRET = os.environ["RENOVATION_API_KEY"]
         self._load_schema_and_seed()
         self.server = ThreadingHTTPServer(("127.0.0.1", 0), api.RenovationHandler)
         self.thread = threading.Thread(target=self.server.serve_forever, daemon=True)
@@ -42,7 +44,15 @@ class ApiTestCase(unittest.TestCase):
         body = json.dumps(payload).encode("utf-8")
         conn = HTTPConnection("127.0.0.1", self.port, timeout=5)
         try:
-            conn.request(method, path, body=body, headers={"Content-Type": "application/json"})
+            conn.request(
+                method,
+                path,
+                body=body,
+                headers={
+                    "Content-Type": "application/json",
+                    "X-API-Key": os.environ["RENOVATION_API_KEY"],
+                },
+            )
             response = conn.getresponse()
             data = response.read().decode("utf-8")
             return response.status, json.loads(data)
