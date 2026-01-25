@@ -9,6 +9,8 @@ from urllib.parse import parse_qs, urlparse
 
 DB_PATH = os.environ.get("RENOVATION_DB", "renovation.db")
 API_AUTH_SECRET = os.environ.get("RENOVATION_API_KEY")
+MAX_CONTENT_LENGTH = int(os.environ.get("MAX_CONTENT_LENGTH", str(2 * 1024 * 1024)))
+SERVER_TIMEOUT = float(os.environ.get("SERVER_TIMEOUT", "10"))
 LOG_LEVEL = os.environ.get("LOG_LEVEL", "INFO").upper()
 logging.basicConfig(
     level=getattr(logging, LOG_LEVEL, logging.INFO),
@@ -24,17 +26,29 @@ def get_db():
 
 
 def read_json(handler):
-    length = int(handler.headers.get("Content-Length", 0))
+    length_header = handler.headers.get("Content-Length")
+    if length_header is None:
+        return None, "Request body required.", 400
+    try:
+        length = int(length_header)
+    except ValueError:
+        return None, "Invalid Content-Length header.", 400
     if length <= 0:
-        return None, "Request body required."
+        return None, "Request body required.", 400
+    if length > MAX_CONTENT_LENGTH:
+        return (
+            None,
+            f"Request body must be {MAX_CONTENT_LENGTH} bytes or less.",
+            413,
+        )
     try:
         payload = handler.rfile.read(length)
         data = json.loads(payload.decode("utf-8"))
         if not isinstance(data, dict):
-            return None, "JSON body must be an object."
-        return data, None
+            return None, "JSON body must be an object.", 400
+        return data, None, 200
     except json.JSONDecodeError:
-        return None, "Invalid JSON payload."
+        return None, "Invalid JSON payload.", 400
 
 
 def send_json(handler, status, payload):
@@ -176,9 +190,9 @@ class RenovationHandler(BaseHTTPRequestHandler):
             return
         if not require_auth(self):
             return
-        data, error = read_json(self)
+        data, error, status = read_json(self)
         if error:
-            send_json(self, 400, {"error": error})
+            send_json(self, status, {"error": error})
             return
         try:
             handler(data)
@@ -468,6 +482,8 @@ def run():
     host = os.environ.get("HOST", "127.0.0.1")
     port = int(os.environ.get("PORT", "8000"))
     server = ThreadingHTTPServer((host, port), RenovationHandler)
+    server.timeout = SERVER_TIMEOUT
+    server.socket.settimeout(SERVER_TIMEOUT)
     print(f"API listening on http://{host}:{port}")
     server.serve_forever()
 

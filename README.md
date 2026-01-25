@@ -41,8 +41,11 @@ Environment variables:
 - `PORT` to change the listening port (default 8000).
 - `LOG_LEVEL` to control logging verbosity (defaults to `INFO`).
 - `RENOVATION_API_KEY` to require an API key or bearer token for POST requests.
+- `MAX_CONTENT_LENGTH` to cap JSON request bodies in bytes (default 2097152 / 2 MB).
+- `SERVER_TIMEOUT` to set the server socket timeout in seconds (default 10).
 
 For production deployments, set `HOST=0.0.0.0` (or an explicit interface) only when you intend to expose the service, and keep it behind a reverse proxy or firewall. The default `127.0.0.1` bind keeps the API limited to local requests for safer development by default.
+Requests with a `Content-Length` larger than the configured `MAX_CONTENT_LENGTH` are rejected with HTTP 413 responses.
 
 Example requests:
 
