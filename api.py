@@ -1,4 +1,5 @@
 import json
+import logging
 import os
 import sqlite3
 from datetime import date, datetime, time
@@ -6,6 +7,12 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 
 DB_PATH = os.environ.get("RENOVATION_DB", "renovation.db")
+LOG_LEVEL = os.environ.get("LOG_LEVEL", "INFO").upper()
+logging.basicConfig(
+    level=getattr(logging, LOG_LEVEL, logging.INFO),
+    format="%(asctime)s %(levelname)s %(name)s %(message)s",
+)
+LOGGER = logging.getLogger("renovation.api")
 
 
 def get_db():
@@ -35,6 +42,7 @@ def send_json(handler, status, payload):
     handler.send_header("Content-Length", str(len(body)))
     handler.end_headers()
     handler.wfile.write(body)
+    LOGGER.info("%s %s -> %s", handler.command, handler.path, status)
 
 
 def require_fields(data, fields):
@@ -128,6 +136,9 @@ class RenovationHandler(BaseHTTPRequestHandler):
             handler(limit, offset)
         except ValueError as exc:
             send_json(self, 400, {"error": str(exc)})
+        except Exception:
+            LOGGER.exception("Unhandled error handling %s %s", self.command, self.path)
+            send_json(self, 500, {"error": "Unexpected server error."})
 
     def do_POST(self):
         routes = {
@@ -153,6 +164,7 @@ class RenovationHandler(BaseHTTPRequestHandler):
         except ValueError as exc:
             send_json(self, 400, {"error": str(exc)})
         except Exception:
+            LOGGER.exception("Unhandled error handling %s %s", self.command, self.path)
             send_json(self, 500, {"error": "Unexpected server error."})
 
     def handle_get_projects(self, limit, offset):
@@ -421,7 +433,12 @@ class RenovationHandler(BaseHTTPRequestHandler):
         send_json(self, 201, {"id": cursor.lastrowid})
 
     def log_message(self, format, *args):
-        return
+        LOGGER.info(
+            "%s - - [%s] %s",
+            self.client_address[0],
+            self.log_date_time_string(),
+            format % args,
+        )
 
 
 def run():
