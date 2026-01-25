@@ -3,6 +3,7 @@ import os
 import sqlite3
 from datetime import date, datetime, time
 from http.server import BaseHTTPRequestHandler, HTTPServer
+from urllib.parse import parse_qs, urlparse
 
 
 DB_PATH = os.environ.get("RENOVATION_DB", "renovation.db")
@@ -79,12 +80,55 @@ def ensure_non_negative(value, field):
     return number
 
 
+def parse_pagination(query):
+    params = parse_qs(query)
+
+    def parse_int(name, default):
+        if name not in params:
+            return default
+        values = params[name]
+        if len(values) != 1 or not values[0]:
+            raise ValueError(f"{name} must be a non-negative integer.")
+        try:
+            number = int(values[0])
+        except ValueError:
+            raise ValueError(f"{name} must be a non-negative integer.")
+        if number < 0:
+            raise ValueError(f"{name} must be a non-negative integer.")
+        return number
+
+    limit = parse_int("limit", 100)
+    offset = parse_int("offset", 0)
+    return limit, offset
+
+
+def rows_to_dicts(cursor):
+    columns = [col[0] for col in cursor.description]
+    return [dict(zip(columns, row)) for row in cursor.fetchall()]
+
+
 class RenovationHandler(BaseHTTPRequestHandler):
     def do_GET(self):
-        if self.path == "/health":
+        parsed = urlparse(self.path)
+        if parsed.path == "/health":
             send_json(self, 200, {"status": "ok"})
             return
-        send_json(self, 404, {"error": "Not found."})
+        routes = {
+            "/projects": self.handle_get_projects,
+            "/tasks": self.handle_get_tasks,
+            "/material-purchases": self.handle_get_material_purchases,
+            "/laborers": self.handle_get_laborers,
+            "/work-sessions": self.handle_get_work_sessions,
+        }
+        handler = routes.get(parsed.path)
+        if not handler:
+            send_json(self, 404, {"error": "Not found."})
+            return
+        try:
+            limit, offset = parse_pagination(parsed.query)
+            handler(limit, offset)
+        except ValueError as exc:
+            send_json(self, 400, {"error": str(exc)})
 
     def do_POST(self):
         routes = {
@@ -111,6 +155,93 @@ class RenovationHandler(BaseHTTPRequestHandler):
             send_json(self, 400, {"error": str(exc)})
         except Exception:
             send_json(self, 500, {"error": "Unexpected server error."})
+
+    def handle_get_projects(self, limit, offset):
+        with get_db() as conn:
+            cursor = conn.execute(
+                """
+                SELECT id, name, description, start_date, end_date
+                FROM projects
+                ORDER BY id
+                LIMIT ? OFFSET ?
+                """,
+                (limit, offset),
+            )
+            items = rows_to_dicts(cursor)
+        send_json(self, 200, {"items": items, "limit": limit, "offset": offset})
+
+    def handle_get_tasks(self, limit, offset):
+        with get_db() as conn:
+            cursor = conn.execute(
+                """
+                SELECT id, project_id, name, start_datetime, end_datetime
+                FROM tasks
+                ORDER BY id
+                LIMIT ? OFFSET ?
+                """,
+                (limit, offset),
+            )
+            items = rows_to_dicts(cursor)
+        send_json(self, 200, {"items": items, "limit": limit, "offset": offset})
+
+    def handle_get_material_purchases(self, limit, offset):
+        with get_db() as conn:
+            cursor = conn.execute(
+                """
+                SELECT
+                  id,
+                  project_id,
+                  task_id,
+                  vendor_id,
+                  material_description,
+                  unit_cost,
+                  quantity,
+                  total_material_cost,
+                  delivery_cost,
+                  purchase_date
+                FROM material_purchases
+                ORDER BY id
+                LIMIT ? OFFSET ?
+                """,
+                (limit, offset),
+            )
+            items = rows_to_dicts(cursor)
+        send_json(self, 200, {"items": items, "limit": limit, "offset": offset})
+
+    def handle_get_laborers(self, limit, offset):
+        with get_db() as conn:
+            cursor = conn.execute(
+                """
+                SELECT id, name, hourly_rate, daily_rate
+                FROM laborers
+                ORDER BY id
+                LIMIT ? OFFSET ?
+                """,
+                (limit, offset),
+            )
+            items = rows_to_dicts(cursor)
+        send_json(self, 200, {"items": items, "limit": limit, "offset": offset})
+
+    def handle_get_work_sessions(self, limit, offset):
+        with get_db() as conn:
+            cursor = conn.execute(
+                """
+                SELECT
+                  id,
+                  laborer_id,
+                  project_id,
+                  task_id,
+                  work_date,
+                  clock_in_time,
+                  clock_out_time
+                FROM work_sessions
+                ORDER BY id
+                LIMIT ? OFFSET ?
+                """,
+                (limit, offset),
+            )
+            items = rows_to_dicts(cursor)
+        send_json(self, 200, {"items": items, "limit": limit, "offset": offset})
 
     def handle_projects(self, data):
         error = require_fields(data, ["name"])
