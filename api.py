@@ -47,7 +47,7 @@ def read_json(handler):
         if not isinstance(data, dict):
             return None, "JSON body must be an object.", 400
         return data, None, 200
-    except json.JSONDecodeError:
+    except (json.JSONDecodeError, UnicodeDecodeError):
         return None, "Invalid JSON payload.", 400
 
 
