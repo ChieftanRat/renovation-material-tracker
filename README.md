@@ -10,6 +10,19 @@ The initial schema lives in [`schema.sql`](schema.sql) and targets SQLite-compat
 sqlite3 renovation.db < schema.sql
 ```
 
+### Migration Notes
+
+Indexes were added to accelerate common date-based lookups, along with composite `(project_id, date)` indexes to support frequent project-scoped filtering:
+
+```sql
+CREATE INDEX idx_tasks_start_datetime ON tasks(start_datetime);
+CREATE INDEX idx_tasks_project_start_datetime ON tasks(project_id, start_datetime);
+CREATE INDEX idx_material_purchases_purchase_date ON material_purchases(purchase_date);
+CREATE INDEX idx_material_purchases_project_purchase_date ON material_purchases(project_id, purchase_date);
+CREATE INDEX idx_work_sessions_work_date ON work_sessions(work_date);
+CREATE INDEX idx_work_sessions_project_work_date ON work_sessions(project_id, work_date);
+```
+
 ## Seed Data
 
 Reference data lives in [`seed.sql`](seed.sql). After creating the schema:
