@@ -53,14 +53,24 @@ curl -X POST http://localhost:8000/material-purchases ^
   -d "{\"project_id\":1,\"vendor_id\":1,\"material_description\":\"Tile\",\"unit_cost\":2.4,\"quantity\":180,\"delivery_cost\":45,\"purchase_date\":\"2025-01-11\"}"
 ```
 
-## Tests
-
-The minimal API test suite starts a local HTTP server against a temporary SQLite database. It loads the schema and seed data from `schema.sql` and `seed.sql` for each test case.
-
-Run the tests with:
+```sh
+curl "http://localhost:8000/projects?limit=10&offset=0"
+```
 
 ```sh
-python -m unittest discover -s tests
+curl "http://localhost:8000/tasks?limit=10&offset=0"
+```
+
+```sh
+curl "http://localhost:8000/material-purchases?limit=10&offset=0"
+```
+
+```sh
+curl "http://localhost:8000/laborers?limit=10&offset=0"
+```
+
+```sh
+curl "http://localhost:8000/work-sessions?limit=10&offset=0"
 ```
 
 ## Next Steps
