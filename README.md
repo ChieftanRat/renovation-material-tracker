@@ -38,6 +38,7 @@ python api.py
 Environment variables:
 - `RENOVATION_DB` to point at a different SQLite file.
 - `PORT` to change the listening port (default 8000).
+- `LOG_LEVEL` to control logging verbosity (defaults to `INFO`).
 
 Example requests:
 
