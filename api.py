@@ -2,7 +2,7 @@ import json
 import os
 import sqlite3
 from datetime import date, datetime, time
-from http.server import BaseHTTPRequestHandler, HTTPServer
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 
 DB_PATH = os.environ.get("RENOVATION_DB", "renovation.db")
@@ -296,7 +296,7 @@ class RenovationHandler(BaseHTTPRequestHandler):
 
 def run():
     port = int(os.environ.get("PORT", "8000"))
-    server = HTTPServer(("0.0.0.0", port), RenovationHandler)
+    server = ThreadingHTTPServer(("0.0.0.0", port), RenovationHandler)
     print(f"API listening on http://localhost:{port}")
     server.serve_forever()
 

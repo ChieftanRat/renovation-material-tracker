@@ -29,7 +29,7 @@ sqlite3 renovation.db
 
 ## API Layer
 
-The API server is a lightweight HTTP service (no external dependencies) for capturing entries with validation.
+The API server is a lightweight HTTP service (no external dependencies) for capturing entries with validation. It uses Python's `ThreadingHTTPServer` to handle concurrent requests, and each request opens its own SQLite connection via `get_db()` to keep database access thread-safe.
 
 ```sh
 python api.py
