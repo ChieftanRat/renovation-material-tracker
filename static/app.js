@@ -60,19 +60,13 @@ const RESOURCES = [
     ],
     filters: [
       { name: "vendor_id", label: "Vendor", type: "select" },
-      { name: "task_id", label: "Task", type: "select", chipWhenSmall: true },
+      { name: "task_id", label: "Task", type: "select" },
       { name: "start_date", label: "Start date", type: "date" },
       { name: "end_date", label: "End date", type: "date" },
     ],
     createFields: [
       { name: "project_id", label: "Project", type: "select", required: true },
-      {
-        name: "task_id",
-        label: "Task",
-        type: "select",
-        required: true,
-        chipWhenSmall: true,
-      },
+      { name: "task_id", label: "Task", type: "select", required: true },
       { name: "vendor_id", label: "Vendor", type: "select", required: true },
       {
         name: "material_description",
@@ -116,28 +110,21 @@ const RESOURCES = [
     modalDescription:
       "Add one or more labor entries for the selected task and date.",
     columns: [
-      { key: "id", label: "ID" },
-      { key: "laborer_names", label: "Labor" },
       { key: "task_name", label: "Task" },
-      { key: "status", label: "Status", type: "badge" },
-      { key: "hours_worked", label: "Hours", type: "number" },
       { key: "work_date", label: "Date" },
+      { key: "laborer_names", label: "Laborers" },
+      { key: "hours_worked", label: "Total hours", type: "number" },
+      { key: "status", label: "Status", type: "badge" },
     ],
     filters: [
       { name: "laborer_id", label: "Laborer", type: "select" },
-      { name: "task_id", label: "Task", type: "select", chipWhenSmall: true },
+      { name: "task_id", label: "Task", type: "select" },
       { name: "start_date", label: "Start date", type: "date" },
       { name: "end_date", label: "End date", type: "date" },
     ],
     createFields: [
       { name: "project_id", label: "Project", type: "select", required: true },
-      {
-        name: "task_id",
-        label: "Task",
-        type: "select",
-        required: true,
-        chipWhenSmall: true,
-      },
+      { name: "task_id", label: "Task", type: "select", required: true },
       {
         name: "work_date",
         label: "Work date",
@@ -184,6 +171,7 @@ const ui = {
   pageSizeInput: document.getElementById("page-size-input"),
   pageApply: document.getElementById("page-apply"),
   addToggle: document.getElementById("add-toggle"),
+  showArchived: document.getElementById("show-archived"),
   refreshAll: document.getElementById("refresh-all"),
   modal: document.getElementById("modal"),
   modalTitle: document.getElementById("modal-title"),
@@ -197,6 +185,8 @@ const ui = {
   projectArchive: document.getElementById("project-archive"),
   projectDelete: document.getElementById("project-delete"),
   backupNow: document.getElementById("backup-now"),
+  backupStatus: document.getElementById("backup-status"),
+  migrationStatus: document.getElementById("migration-status"),
   manageEntities: document.getElementById("manage-entities"),
   manageModal: document.getElementById("manage-modal"),
   manageBody: document.getElementById("manage-body"),
@@ -274,11 +264,19 @@ function renderTable(resource, columns, rows) {
   columns.forEach((col) => {
     const th = document.createElement("th");
     th.textContent = col.label;
+    if (col.type === "number") {
+      th.classList.add("numeric");
+    }
     headRow.appendChild(th);
   });
   if (resource.editable) {
+    if (ui.showArchived.checked) {
+      const thStatus = document.createElement("th");
+      thStatus.textContent = "Archived";
+      headRow.appendChild(thStatus);
+    }
     const th = document.createElement("th");
-    th.textContent = "Edit";
+    th.textContent = "Actions";
     headRow.appendChild(th);
   }
   thead.appendChild(headRow);
@@ -306,33 +304,30 @@ function renderTable(resource, columns, rows) {
       }
       tr.appendChild(td);
     });
+    if (resource.editable && ui.showArchived.checked) {
+      const badgeCell = document.createElement("td");
+      if (row.archived_at) {
+        const badge = document.createElement("span");
+        badge.className = "badge archived";
+        badge.textContent = "Archived";
+        badgeCell.appendChild(badge);
+      }
+      tr.appendChild(badgeCell);
+    }
     if (resource.editable) {
       const td = document.createElement("td");
-      const group = document.createElement("div");
-      group.className = "action-group";
-      const editButton = document.createElement("button");
-      editButton.className = "btn ghost";
-      editButton.textContent = "Edit";
-      editButton.addEventListener("click", () =>
-        openModal(resource, { mode: "edit", data: row })
-      );
-      group.appendChild(editButton);
-      const archiveButton = document.createElement("button");
-      archiveButton.className = "btn ghost";
-      archiveButton.textContent = "Archive";
-      archiveButton.addEventListener("click", () =>
-        archiveRecord(resource, row.id)
-      );
-      const deleteButton = document.createElement("button");
-      deleteButton.className = "btn ghost";
-      deleteButton.textContent = "Delete";
-      deleteButton.addEventListener("click", () =>
-        deleteRecord(resource, row.id)
-      );
-      group.appendChild(archiveButton);
-      group.appendChild(deleteButton);
-      td.appendChild(group);
+      const menu = createRowMenu(resource, row);
+      td.appendChild(menu);
       tr.appendChild(td);
+    }
+    if (resource.key === "work-sessions") {
+      tr.classList.add("clickable-row");
+      tr.addEventListener("click", (event) => {
+        if (event.target.closest(".row-menu")) {
+          return;
+        }
+        openModal(resource, { mode: "edit", data: row });
+      });
     }
     tbody.appendChild(tr);
   });
@@ -361,6 +356,9 @@ function buildQueryParams(resource) {
       params[key] = filters[key];
     }
   });
+  if (ui.showArchived.checked) {
+    params.include_archived = "true";
+  }
   return params;
 }
 
@@ -396,12 +394,23 @@ function enrichRows(resource, rows) {
     if (resource.key === "work-sessions") {
       updated.task_name = taskMap.get(row.task_id) || "-";
       const entries = row.entries || [];
-      const laborerNames = entries
-        .map((entry) => laborerMap.get(entry.laborer_id) || "-")
-        .filter((name) => name && name !== "-");
-      updated.laborer_names = laborerNames.length
-        ? laborerNames.join(", ")
-        : "-";
+      const laborerNames = [];
+      const seen = new Set();
+      for (const entry of entries) {
+        const name = laborerMap.get(entry.laborer_id) || "-";
+        if (!name || name == "-" || seen.has(name)) {
+          continue;
+        }
+        seen.add(name);
+        laborerNames.push(name);
+      }
+      if (laborerNames.length <= 2) {
+        updated.laborer_names = laborerNames.length
+          ? laborerNames.join(", ")
+          : "-";
+      } else {
+        updated.laborer_names = `${laborerNames[0]} +${laborerNames.length - 1} more`;
+      }
       updated.hours_worked = entries.reduce(
         (sum, entry) =>
           sum +
@@ -471,6 +480,7 @@ async function refreshLookups() {
     }
   }
   renderProjects();
+  updateProjectArchiveLabel();
 }
 
 function renderProjects() {
@@ -635,6 +645,7 @@ function setProject(project) {
   updateProjectSummary();
   updateAddButton();
   updateProjectEditButton();
+  updateProjectArchiveLabel();
   loadList();
 }
 
@@ -674,6 +685,135 @@ function updateProjectEditButton() {
   ui.projectDelete.disabled = !state.selectedProjectId;
 }
 
+function updateProjectArchiveLabel() {
+  if (!state.selectedProject) {
+    ui.projectArchive.textContent = "Archive";
+    return;
+  }
+  ui.projectArchive.textContent = state.selectedProject.archived_at
+    ? "Restore"
+    : "Archive";
+}
+
+function createRowMenu(resource, row) {
+  const wrapper = document.createElement("div");
+  wrapper.className = "row-menu";
+  const toggle = document.createElement("button");
+  toggle.className = "btn ghost";
+  toggle.textContent = "...";
+  const menu = document.createElement("div");
+  menu.className = "row-menu-panel";
+
+  const editButton = document.createElement("button");
+  editButton.className = "btn ghost";
+  editButton.textContent = "Edit";
+  editButton.addEventListener("click", () => {
+    openModal(resource, { mode: "edit", data: row });
+    menu.classList.remove("open");
+  });
+
+  const archiveButton = document.createElement("button");
+  archiveButton.className = "btn ghost";
+  const isArchived = Boolean(row.archived_at);
+  archiveButton.textContent = isArchived ? "Restore" : "Archive";
+  archiveButton.addEventListener("click", () => {
+    if (isArchived) {
+      restoreRecord(resource, row.id);
+    } else {
+      archiveRecord(resource, row.id);
+    }
+    menu.classList.remove("open");
+  });
+
+  const deleteButton = document.createElement("button");
+  deleteButton.className = "btn ghost";
+  deleteButton.textContent = "Delete";
+  deleteButton.addEventListener("click", () => {
+    deleteRecord(resource, row.id);
+    menu.classList.remove("open");
+  });
+
+  menu.appendChild(editButton);
+  menu.appendChild(archiveButton);
+  menu.appendChild(deleteButton);
+
+  toggle.addEventListener("click", (event) => {
+    event.stopPropagation();
+    menu.classList.toggle("open");
+  });
+
+  document.addEventListener("click", () => {
+    menu.classList.remove("open");
+  });
+
+  wrapper.appendChild(toggle);
+  wrapper.appendChild(menu);
+  return wrapper;
+}
+
+function createDirectoryMenu(activeKey, item) {
+  const wrapper = document.createElement("div");
+  wrapper.className = "row-menu";
+  const toggle = document.createElement("button");
+  toggle.className = "btn ghost";
+  toggle.textContent = "...";
+  const menu = document.createElement("div");
+  menu.className = "row-menu-panel";
+
+  const editButton = document.createElement("button");
+  editButton.className = "btn ghost";
+  editButton.textContent = "Edit";
+  editButton.addEventListener("click", () => {
+    openManageEdit(activeKey, item);
+    menu.classList.remove("open");
+  });
+
+  const archiveButton = document.createElement("button");
+  archiveButton.className = "btn ghost";
+  const isArchived = Boolean(item.archived_at);
+  archiveButton.textContent = isArchived ? "Restore" : "Archive";
+  archiveButton.addEventListener("click", () => {
+    const resource = {
+      title: activeKey === "vendors" ? "Vendor" : "Laborer",
+      endpoint: `/${activeKey}`,
+    };
+    if (isArchived) {
+      restoreRecord(resource, item.id);
+    } else {
+      archiveRecord(resource, item.id);
+    }
+    menu.classList.remove("open");
+  });
+
+  const deleteButton = document.createElement("button");
+  deleteButton.className = "btn ghost";
+  deleteButton.textContent = "Delete";
+  deleteButton.addEventListener("click", () => {
+    deleteRecord(
+      { title: activeKey === "vendors" ? "Vendor" : "Laborer", endpoint: `/${activeKey}` },
+      item.id
+    );
+    menu.classList.remove("open");
+  });
+
+  menu.appendChild(editButton);
+  menu.appendChild(archiveButton);
+  menu.appendChild(deleteButton);
+
+  toggle.addEventListener("click", (event) => {
+    event.stopPropagation();
+    menu.classList.toggle("open");
+  });
+
+  document.addEventListener("click", () => {
+    menu.classList.remove("open");
+  });
+
+  wrapper.appendChild(toggle);
+  wrapper.appendChild(menu);
+  return wrapper;
+}
+
 function createField(field, options = [], config = {}) {
   const wrapper = document.createElement("div");
   wrapper.className = "field";
@@ -687,62 +827,6 @@ function createField(field, options = [], config = {}) {
   error.style.display = "none";
   let input;
   const initialValue = config.initialValue || "";
-  const useChips =
-    field.type === "select" &&
-    field.chipWhenSmall &&
-    options.length > 0 &&
-    options.length <= 4;
-  if (useChips) {
-    input = document.createElement("input");
-    input.type = "hidden";
-    input.name = field.name;
-    input.value = initialValue;
-    const chips = document.createElement("div");
-    chips.className = "chip-group";
-    if (config.allowClear) {
-      const clearChip = document.createElement("button");
-      clearChip.type = "button";
-      clearChip.className = "chip";
-      clearChip.textContent = "All";
-      clearChip.dataset.value = "";
-      chips.appendChild(clearChip);
-    }
-    options.forEach((opt) => {
-      const chip = document.createElement("button");
-      chip.type = "button";
-      chip.className = "chip";
-      chip.textContent = opt.label;
-      chip.dataset.value = opt.value;
-      chips.appendChild(chip);
-    });
-    const updateActive = () => {
-      const value = input.value;
-      chips.querySelectorAll(".chip").forEach((chip) => {
-        const isActive = chip.dataset.value === value;
-        chip.classList.toggle("active", isActive);
-      });
-    };
-    chips.addEventListener("click", (event) => {
-      const target = event.target;
-      if (!(target instanceof HTMLButtonElement)) {
-        return;
-      }
-      const value = target.dataset.value || "";
-      if (config.allowClear && input.value === value) {
-        input.value = "";
-      } else {
-        input.value = value;
-      }
-      input.dispatchEvent(new Event("change"));
-      updateActive();
-    });
-    updateActive();
-    wrapper.appendChild(label);
-    wrapper.appendChild(chips);
-    wrapper.appendChild(input);
-    wrapper.appendChild(error);
-    return { wrapper, input, error };
-  }
   if (field.type === "select") {
     input = document.createElement("select");
     const placeholder = document.createElement("option");
@@ -1305,7 +1389,17 @@ async function archiveProject() {
     showToast("Select a project first.", "error");
     return;
   }
-  await archiveRecord({ title: "Project", endpoint: "/projects" }, state.selectedProjectId);
+  if (state.selectedProject?.archived_at) {
+    await restoreRecord(
+      { title: "Project", endpoint: "/projects" },
+      state.selectedProjectId
+    );
+  } else {
+    await archiveRecord(
+      { title: "Project", endpoint: "/projects" },
+      state.selectedProjectId
+    );
+  }
 }
 
 async function deleteProject() {
@@ -1325,6 +1419,20 @@ async function archiveRecord(resource, recordId) {
       method: "POST",
     });
     showToast(`${resource.title} archived.`);
+    await refreshLookups();
+    updateProjectSummary();
+    loadList();
+  } catch (err) {
+    showToast(err.message, "error");
+  }
+}
+
+async function restoreRecord(resource, recordId) {
+  try {
+    await fetchJson(`${resource.endpoint}/${recordId}/restore`, {
+      method: "POST",
+    });
+    showToast(`${resource.title} restored.`);
     await refreshLookups();
     updateProjectSummary();
     loadList();
@@ -1395,37 +1503,9 @@ function renderManageBody(activeKey) {
     }
     details.appendChild(name);
     details.appendChild(meta);
-    const actions = document.createElement("div");
-    actions.className = "action-group";
-    const editButton = document.createElement("button");
-    editButton.className = "btn ghost";
-    editButton.textContent = "Edit";
-    editButton.addEventListener("click", () =>
-      openManageEdit(activeKey, item)
-    );
-    const archiveButton = document.createElement("button");
-    archiveButton.className = "btn ghost";
-    archiveButton.textContent = "Archive";
-    archiveButton.addEventListener("click", () =>
-      archiveRecord(
-        { title: activeKey === "vendors" ? "Vendor" : "Laborer", endpoint: `/${activeKey}` },
-        item.id
-      )
-    );
-    const deleteButton = document.createElement("button");
-    deleteButton.className = "btn ghost";
-    deleteButton.textContent = "Delete";
-    deleteButton.addEventListener("click", () =>
-      deleteRecord(
-        { title: activeKey === "vendors" ? "Vendor" : "Laborer", endpoint: `/${activeKey}` },
-        item.id
-      )
-    );
-    actions.appendChild(editButton);
-    actions.appendChild(archiveButton);
-    actions.appendChild(deleteButton);
+    const menu = createDirectoryMenu(activeKey, item);
     row.appendChild(details);
-    row.appendChild(actions);
+    row.appendChild(menu);
     list.appendChild(row);
   });
 
@@ -1603,11 +1683,17 @@ ui.backupNow.addEventListener("click", async () => {
   try {
     await fetchJson("/backups", { method: "POST" });
     showToast("Backup created.");
+    await refreshStatusPanel();
   } catch (err) {
     showToast(err.message, "error");
   } finally {
     ui.backupNow.disabled = false;
   }
+});
+ui.showArchived.addEventListener("change", () => {
+  ui.pageInput.value = 1;
+  setPaginationForTab();
+  loadList();
 });
 ui.projectSearch.addEventListener("input", renderProjects);
 ui.manageEntities.addEventListener("click", () => openManageModal("vendors"));
@@ -1615,13 +1701,34 @@ ui.manageClose.addEventListener("click", closeManageModal);
 
 ui.refreshAll.addEventListener("click", async () => {
   await refreshLookups();
+  await refreshStatusPanel();
   updateProjectSummary();
   loadList();
 });
 
+async function refreshStatusPanel() {
+  try {
+    const backup = await fetchJson("/backups");
+    const lastBackup = backup.last_backup_at
+      ? `${backup.last_backup_at} UTC`
+      : "No backups yet";
+    ui.backupStatus.textContent = `${lastBackup} (retention ${backup.retention_days}d)`;
+  } catch (err) {
+    ui.backupStatus.textContent = "Unavailable";
+  }
+
+  try {
+    const migrations = await fetchJson("/migrations");
+    ui.migrationStatus.textContent = `${migrations.count} applied`;
+  } catch (err) {
+    ui.migrationStatus.textContent = "Unavailable";
+  }
+}
+
 async function init() {
   renderTabs();
   await refreshLookups();
+  await refreshStatusPanel();
   const firstProject = state.lookups.projects[0];
   if (firstProject) {
     setProject(firstProject);
@@ -1635,6 +1742,7 @@ async function init() {
   updateFilterToggle();
   updateAddButton();
   updateProjectEditButton();
+  updateProjectArchiveLabel();
   showTipsOnce();
 }
 

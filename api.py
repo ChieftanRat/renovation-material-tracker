@@ -210,6 +210,17 @@ class RenovationHandler(BaseHTTPRequestHandler):
         if parsed.path == "/health":
             send_json(self, 200, {"status": "ok"})
             return
+        if parsed.path == "/migrations":
+            with get_db() as conn:
+                rows = conn.execute(
+                    "SELECT name, applied_at FROM schema_migrations ORDER BY applied_at"
+                ).fetchall()
+            send_json(
+                self,
+                200,
+                {"applied": rows_to_dicts(rows), "count": len(rows)},
+            )
+            return
         if parsed.path == "/backups":
             send_json(
                 self,

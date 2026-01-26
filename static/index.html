@@ -66,14 +66,25 @@
             </p>
             <div class="guidance muted" id="project-guidance"></div>
           </div>
-          <div class="main-actions">
-            <button class="btn ghost" id="project-edit">Edit project</button>
-            <button class="btn ghost" id="project-archive">Archive</button>
-            <button class="btn ghost" id="project-delete">Delete</button>
-            <button class="btn ghost" id="backup-now">Backup now</button>
-            <button class="btn ghost" id="refresh-all">Refresh</button>
-          </div>
+        <div class="main-actions">
+          <button class="btn ghost" id="project-edit">Edit project</button>
+          <button class="btn ghost" id="project-archive">Archive</button>
+          <button class="btn ghost" id="project-delete">Delete</button>
+          <button class="btn ghost" id="backup-now">Backup now</button>
+          <button class="btn ghost" id="refresh-all">Refresh</button>
         </div>
+      </div>
+
+      <section class="status-panel">
+        <div>
+          <span class="label">Backups</span>
+          <span class="value" id="backup-status">Checking...</span>
+        </div>
+        <div>
+          <span class="label">Migrations</span>
+          <span class="value" id="migration-status">Checking...</span>
+        </div>
+      </section>
 
         <section class="summary-strip">
           <div>
@@ -97,6 +108,10 @@
             <div class="panel-actions">
               <button class="btn ghost" id="filter-toggle">Filters</button>
               <button class="btn primary" id="add-toggle">Add new</button>
+              <label class="toggle">
+                <input type="checkbox" id="show-archived" />
+                <span>Show archived</span>
+              </label>
             </div>
             <div class="panel-pagination">
               <label>

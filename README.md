@@ -60,6 +60,10 @@ curl -X POST http://localhost:8000/material-purchases ^
 - Expand the API with read endpoints and pagination.
 - Build exports and dashboards for materials, labor, task analytics, and estimates.
 
+## Quick Start (Windows)
+
+Double-click `start.bat` to launch the API and open the UI in your browser.
+
 ## Backup Export
 
 Use `backup_export.py` to export a SQL backup. By default, it excludes seeded data
@@ -85,3 +89,14 @@ py backup_restore.py --backup backups/backup_YYYYMMDD_HHMMSS.sql
 Optional flags:
 - `--db` to point at a different SQLite file.
 - `--yes` to skip the confirmation prompt.
+
+## Migrations
+
+Apply schema migrations without wiping data:
+
+```sh
+py migrate.py
+```
+
+Optional flags:
+- `--db` to point at a different SQLite file.
