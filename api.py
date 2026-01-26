@@ -169,6 +169,66 @@ def parse_pagination(query):
     return page, page_size, limit, offset
 
 
+def get_query_value(query, name):
+    params = parse_qs(query, keep_blank_values=True)
+    if name not in params:
+        return None
+    values = params[name]
+    if len(values) != 1:
+        raise ValueError(f"{name} must be provided once.")
+    value = values[0].strip()
+    if not value:
+        raise ValueError(f"{name} is required.")
+    return value
+
+
+def parse_optional_int(value, field):
+    if value is None:
+        return None
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        raise ValueError(f"{field} must be an integer.")
+
+
+def parse_optional_bool(value, field):
+    if value is None:
+        return None
+    normalized = value.strip().lower()
+    if normalized in ("true", "1", "yes", "y"):
+        return True
+    if normalized in ("false", "0", "no", "n"):
+        return False
+    raise ValueError(f"{field} must be true or false.")
+
+
+def build_filters(query, filters):
+    clauses = []
+    params = []
+    for name, column, value_type in filters:
+        raw_value = get_query_value(query, name)
+        if raw_value is None:
+            continue
+        if value_type == "int":
+            value = parse_optional_int(raw_value, name)
+        elif value_type == "date":
+            value = parse_date(raw_value, name).isoformat()
+        elif value_type == "datetime":
+            value = parse_datetime(raw_value, name).isoformat()
+        else:
+            raise ValueError(f"Unsupported filter type: {value_type}")
+        if name.startswith("start_"):
+            operator = ">="
+        elif name.startswith("end_"):
+            operator = "<="
+        else:
+            operator = "="
+        clauses.append(f"{column} {operator} ?")
+        params.append(value)
+    where_sql = f" WHERE {' AND '.join(clauses)}" if clauses else ""
+    return where_sql, params
+
+
 def rows_to_dicts(cursor):
     columns = [col[0] for col in cursor.description]
     return [dict(zip(columns, row)) for row in cursor.fetchall()]
@@ -375,16 +435,35 @@ class RenovationHandler(BaseHTTPRequestHandler):
         )
 
     def handle_get_tasks(self, page, page_size, limit, offset):
+        query = urlparse(self.path).query
+        include_archived = parse_optional_bool(
+            get_query_value(query, "include_archived"),
+            "include_archived",
+        )
+        filters = [
+            ("project_id", "t.project_id", "int"),
+            ("start_date", "date(t.start_datetime)", "date"),
+            ("end_date", "date(t.end_datetime)", "date"),
+        ]
+        where_sql, params = build_filters(query, filters)
+        if not include_archived:
+            if where_sql:
+                where_sql += " AND t.archived_at IS NULL"
+            else:
+                where_sql = " WHERE t.archived_at IS NULL"
         with get_db() as conn:
-            total = conn.execute("SELECT COUNT(*) FROM tasks").fetchone()[0]
+            total = conn.execute(f"SELECT COUNT(*) FROM tasks t{where_sql}", params).fetchone()[
+                0
+            ]
             cursor = conn.execute(
-                """
-                SELECT id, project_id, name, start_datetime, end_datetime
-                FROM tasks
-                ORDER BY id
+                f"""
+                SELECT id, project_id, name, start_datetime, end_datetime, archived_at
+                FROM tasks t
+                {where_sql}
+                ORDER BY t.id
                 LIMIT ? OFFSET ?
                 """,
-                (limit, offset),
+                params + [limit, offset],
             )
             items = rows_to_dicts(cursor)
         total_pages = (total + page_size - 1) // page_size if total else 0
@@ -427,10 +506,34 @@ class RenovationHandler(BaseHTTPRequestHandler):
         )
 
     def handle_get_material_purchases(self, page, page_size, limit, offset):
+        query = urlparse(self.path).query
+        include_archived = parse_optional_bool(
+            get_query_value(query, "include_archived"),
+            "include_archived",
+        )
+        project_id = get_query_value(query, "project_id")
+        if project_id is None:
+            raise ValueError("project_id is required.")
+        filters = [
+            ("project_id", "mp.project_id", "int"),
+            ("task_id", "mp.task_id", "int"),
+            ("vendor_id", "mp.vendor_id", "int"),
+            ("start_date", "mp.purchase_date", "date"),
+            ("end_date", "mp.purchase_date", "date"),
+        ]
+        where_sql, params = build_filters(query, filters)
+        if not include_archived:
+            if where_sql:
+                where_sql += " AND mp.archived_at IS NULL"
+            else:
+                where_sql = " WHERE mp.archived_at IS NULL"
         with get_db() as conn:
-            total = conn.execute("SELECT COUNT(*) FROM material_purchases").fetchone()[0]
+            total = conn.execute(
+                f"SELECT COUNT(*) FROM material_purchases mp{where_sql}",
+                params,
+            ).fetchone()[0]
             cursor = conn.execute(
-                """
+                f"""
                 SELECT
                   id,
                   project_id,
@@ -441,12 +544,14 @@ class RenovationHandler(BaseHTTPRequestHandler):
                   quantity,
                   total_material_cost,
                   delivery_cost,
-                  purchase_date
-                FROM material_purchases
-                ORDER BY id
+                  purchase_date,
+                  archived_at
+                FROM material_purchases mp
+                {where_sql}
+                ORDER BY mp.id
                 LIMIT ? OFFSET ?
                 """,
-                (limit, offset),
+                params + [limit, offset],
             )
             items = rows_to_dicts(cursor)
         total_pages = (total + page_size - 1) // page_size if total else 0
@@ -489,37 +594,15 @@ class RenovationHandler(BaseHTTPRequestHandler):
         )
 
     def handle_get_work_sessions(self, page, page_size, limit, offset):
-        with get_db() as conn:
-            total = conn.execute("SELECT COUNT(*) FROM work_sessions").fetchone()[0]
-            cursor = conn.execute(
-                """
-                SELECT
-                  id,
-                  laborer_id,
-                  project_id,
-                  task_id,
-                  work_date,
-                  clock_in_time,
-                  clock_out_time
-                FROM work_sessions
-                ORDER BY id
-                LIMIT ? OFFSET ?
-                """,
-                (limit, offset),
-            )
-            items = rows_to_dicts(cursor)
-        total_pages = (total + page_size - 1) // page_size if total else 0
-        send_json(
-            self,
-            200,
-            {
-                "data": items,
-                "page": page,
-                "page_size": page_size,
-                "total": total,
-                "total_pages": total_pages,
-            },
+        query = urlparse(self.path).query
+        include_archived = parse_optional_bool(
+            get_query_value(query, "include_archived"),
+            "include_archived",
         )
+        project_id = get_query_value(query, "project_id")
+        if project_id is None:
+            raise ValueError("project_id is required.")
+        self.handle_work_sessions_list(query, page, page_size, include_archived)
 
     def handle_projects(self, data):
         error = require_fields(data, ["name"])
@@ -977,7 +1060,7 @@ class RenovationHandler(BaseHTTPRequestHandler):
             ).fetchone()[0]
             rows = conn.execute(
                 f"""
-                SELECT ws.id, ws.project_id, ws.task_id, ws.work_date
+                SELECT ws.id, ws.project_id, ws.task_id, ws.work_date, ws.archived_at
                 FROM work_sessions ws
                 {where_sql}
                 ORDER BY ws.id
