@@ -135,23 +135,25 @@ def ensure_non_negative(value, field):
 def parse_pagination(query):
     params = parse_qs(query)
 
-    def parse_int(name, default):
+    def parse_int(name, default, minimum):
         if name not in params:
             return default
         values = params[name]
         if len(values) != 1 or not values[0]:
-            raise ValueError(f"{name} must be a non-negative integer.")
+            raise ValueError(f"{name} must be an integer of at least {minimum}.")
         try:
             number = int(values[0])
         except ValueError:
-            raise ValueError(f"{name} must be a non-negative integer.")
-        if number < 0:
-            raise ValueError(f"{name} must be a non-negative integer.")
+            raise ValueError(f"{name} must be an integer of at least {minimum}.")
+        if number < minimum:
+            raise ValueError(f"{name} must be an integer of at least {minimum}.")
         return number
 
-    limit = parse_int("limit", 100)
-    offset = parse_int("offset", 0)
-    return limit, offset
+    page = parse_int("page", 1, 1)
+    page_size = parse_int("page_size", 25, 1)
+    limit = page_size
+    offset = (page - 1) * page_size
+    return page, page_size, limit, offset
 
 
 def rows_to_dicts(cursor):
@@ -179,6 +181,7 @@ class RenovationHandler(BaseHTTPRequestHandler):
         routes = {
             "/projects": self.handle_get_projects,
             "/tasks": self.handle_get_tasks,
+            "/vendors": self.handle_get_vendors,
             "/material-purchases": self.handle_get_material_purchases,
             "/laborers": self.handle_get_laborers,
             "/work-sessions": self.handle_get_work_sessions,
@@ -188,8 +191,8 @@ class RenovationHandler(BaseHTTPRequestHandler):
             send_json(self, 404, {"error": "Not found."})
             return
         try:
-            limit, offset = parse_pagination(parsed.query)
-            handler(limit, offset)
+            page, page_size, limit, offset = parse_pagination(parsed.query)
+            handler(page, page_size, limit, offset)
         except ValueError as exc:
             send_json(self, 400, {"error": str(exc)})
         except Exception:
@@ -291,8 +294,9 @@ class RenovationHandler(BaseHTTPRequestHandler):
             LOGGER.exception("Unhandled error handling %s %s", self.command, self.path)
             send_json(self, 500, {"error": "Unexpected server error."})
 
-    def handle_get_projects(self, limit, offset):
+    def handle_get_projects(self, page, page_size, limit, offset):
         with get_db() as conn:
+            total = conn.execute("SELECT COUNT(*) FROM projects").fetchone()[0]
             cursor = conn.execute(
                 """
                 SELECT id, name, description, start_date, end_date
@@ -303,10 +307,22 @@ class RenovationHandler(BaseHTTPRequestHandler):
                 (limit, offset),
             )
             items = rows_to_dicts(cursor)
-        send_json(self, 200, {"items": items, "limit": limit, "offset": offset})
+        total_pages = (total + page_size - 1) // page_size if total else 0
+        send_json(
+            self,
+            200,
+            {
+                "data": items,
+                "page": page,
+                "page_size": page_size,
+                "total": total,
+                "total_pages": total_pages,
+            },
+        )
 
-    def handle_get_tasks(self, limit, offset):
+    def handle_get_tasks(self, page, page_size, limit, offset):
         with get_db() as conn:
+            total = conn.execute("SELECT COUNT(*) FROM tasks").fetchone()[0]
             cursor = conn.execute(
                 """
                 SELECT id, project_id, name, start_datetime, end_datetime
@@ -317,10 +333,48 @@ class RenovationHandler(BaseHTTPRequestHandler):
                 (limit, offset),
             )
             items = rows_to_dicts(cursor)
-        send_json(self, 200, {"items": items, "limit": limit, "offset": offset})
+        total_pages = (total + page_size - 1) // page_size if total else 0
+        send_json(
+            self,
+            200,
+            {
+                "data": items,
+                "page": page,
+                "page_size": page_size,
+                "total": total,
+                "total_pages": total_pages,
+            },
+        )
 
-    def handle_get_material_purchases(self, limit, offset):
+    def handle_get_vendors(self, page, page_size, limit, offset):
         with get_db() as conn:
+            total = conn.execute("SELECT COUNT(*) FROM vendors").fetchone()[0]
+            cursor = conn.execute(
+                """
+                SELECT id, name
+                FROM vendors
+                ORDER BY id
+                LIMIT ? OFFSET ?
+                """,
+                (limit, offset),
+            )
+            items = rows_to_dicts(cursor)
+        total_pages = (total + page_size - 1) // page_size if total else 0
+        send_json(
+            self,
+            200,
+            {
+                "data": items,
+                "page": page,
+                "page_size": page_size,
+                "total": total,
+                "total_pages": total_pages,
+            },
+        )
+
+    def handle_get_material_purchases(self, page, page_size, limit, offset):
+        with get_db() as conn:
+            total = conn.execute("SELECT COUNT(*) FROM material_purchases").fetchone()[0]
             cursor = conn.execute(
                 """
                 SELECT
@@ -341,10 +395,22 @@ class RenovationHandler(BaseHTTPRequestHandler):
                 (limit, offset),
             )
             items = rows_to_dicts(cursor)
-        send_json(self, 200, {"items": items, "limit": limit, "offset": offset})
+        total_pages = (total + page_size - 1) // page_size if total else 0
+        send_json(
+            self,
+            200,
+            {
+                "data": items,
+                "page": page,
+                "page_size": page_size,
+                "total": total,
+                "total_pages": total_pages,
+            },
+        )
 
-    def handle_get_laborers(self, limit, offset):
+    def handle_get_laborers(self, page, page_size, limit, offset):
         with get_db() as conn:
+            total = conn.execute("SELECT COUNT(*) FROM laborers").fetchone()[0]
             cursor = conn.execute(
                 """
                 SELECT id, name, hourly_rate, daily_rate
@@ -355,10 +421,22 @@ class RenovationHandler(BaseHTTPRequestHandler):
                 (limit, offset),
             )
             items = rows_to_dicts(cursor)
-        send_json(self, 200, {"items": items, "limit": limit, "offset": offset})
+        total_pages = (total + page_size - 1) // page_size if total else 0
+        send_json(
+            self,
+            200,
+            {
+                "data": items,
+                "page": page,
+                "page_size": page_size,
+                "total": total,
+                "total_pages": total_pages,
+            },
+        )
 
-    def handle_get_work_sessions(self, limit, offset):
+    def handle_get_work_sessions(self, page, page_size, limit, offset):
         with get_db() as conn:
+            total = conn.execute("SELECT COUNT(*) FROM work_sessions").fetchone()[0]
             cursor = conn.execute(
                 """
                 SELECT
@@ -376,7 +454,18 @@ class RenovationHandler(BaseHTTPRequestHandler):
                 (limit, offset),
             )
             items = rows_to_dicts(cursor)
-        send_json(self, 200, {"items": items, "limit": limit, "offset": offset})
+        total_pages = (total + page_size - 1) // page_size if total else 0
+        send_json(
+            self,
+            200,
+            {
+                "data": items,
+                "page": page,
+                "page_size": page_size,
+                "total": total,
+                "total_pages": total_pages,
+            },
+        )
 
     def handle_projects(self, data):
         error = require_fields(data, ["name"])
