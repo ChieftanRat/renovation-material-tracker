@@ -72,6 +72,10 @@ body {
 
 .topbar-right {
   text-align: right;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  align-items: flex-end;
 }
 
 .pill {
@@ -100,6 +104,21 @@ body {
 .value {
   font-weight: 600;
   font-size: 14px;
+}
+
+.api-key-field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.api-key-input {
+  padding: 8px 10px;
+  border-radius: 10px;
+  border: 1px solid var(--stroke);
+  background: #fffaf5;
+  font-family: inherit;
+  min-width: 180px;
 }
 
 .muted {
