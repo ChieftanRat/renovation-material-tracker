@@ -556,70 +556,23 @@ async function updateProjectSummary() {
     return;
   }
 
-  const [tasksPayload, purchasesPayload, sessionsPayload] = await Promise.all([
-    fetchJson(`/tasks?project_id=${state.selectedProjectId}&page=1&page_size=200`),
-    fetchJson(
-      `/material-purchases?project_id=${state.selectedProjectId}&page=1&page_size=200`
-    ),
-    fetchJson(
-      `/work-sessions?project_id=${state.selectedProjectId}&page=1&page_size=200`
-    ),
-  ]);
-
-  const tasksCount = tasksPayload.total || tasksPayload.data.length;
-  const purchases = purchasesPayload.data || [];
-  const sessions = sessionsPayload.data || [];
-
-  const materialTotal = purchases.reduce(
-    (sum, row) => sum + (row.total_material_cost || 0) + (row.delivery_cost || 0),
-    0
-  );
-
-  const laborerMap = state.lookups.laborers.reduce((map, laborer) => {
-    map[laborer.id] = laborer;
-    return map;
-  }, {});
-
-  const laborTotal = sessions.reduce((sum, session) => {
-    const entries = session.entries || [];
-    return (
-      sum +
-      entries.reduce((entrySum, entry) => {
-        const laborer = laborerMap[entry.laborer_id];
-        if (!laborer) {
-          return entrySum;
-        }
-        if (laborer.hourly_rate) {
-          const hours = hoursBetween(
-            session.work_date,
-            entry.clock_in_time,
-            entry.clock_out_time
-          );
-          return entrySum + hours * laborer.hourly_rate;
-        }
-        if (laborer.daily_rate) {
-          return entrySum + laborer.daily_rate;
-        }
-        return entrySum;
-      }, 0)
-    );
-  }, 0);
-
-  const hasLaborRateForSessions = sessions.some((session) =>
-    (session.entries || []).some((entry) => {
-      const laborer = laborerMap[entry.laborer_id];
-      return laborer && (laborer.hourly_rate || laborer.daily_rate);
-    })
-  );
+  const summary = await fetchJson(`/projects/${state.selectedProjectId}/summary`);
+  const tasksCount = summary.tasks_count || 0;
+  const purchasesCount = summary.purchases_count || 0;
+  const sessionsCount = summary.sessions_count || 0;
+  const materialTotal = summary.material_total || 0;
+  const laborTotal = summary.labor_total || 0;
+  const combinedTotal = summary.combined_total || materialTotal + laborTotal;
+  const hasLaborRateForSessions = summary.has_labor_rates;
 
   ui.totalMaterials.textContent = `$${materialTotal.toFixed(2)}`;
   ui.totalLabor.textContent = `$${laborTotal.toFixed(2)}`;
-  ui.totalCombined.textContent = `$${(materialTotal + laborTotal).toFixed(2)}`;
+  ui.totalCombined.textContent = `$${combinedTotal.toFixed(2)}`;
 
   const progress = [
     { label: "Tasks added", done: tasksCount > 0 },
-    { label: "Purchases logged", done: purchases.length > 0 },
-    { label: "Labor scheduled", done: sessions.length > 0 },
+    { label: "Purchases logged", done: purchasesCount > 0 },
+    { label: "Labor scheduled", done: sessionsCount > 0 },
   ];
 
   ui.progressStrip.innerHTML = "";
@@ -633,9 +586,9 @@ async function updateProjectSummary() {
   let guidance = "";
   if (tasksCount === 0) {
     guidance = "Start by adding tasks to outline the work.";
-  } else if (purchases.length === 0) {
+  } else if (purchasesCount === 0) {
     guidance = "Log materials to track costs.";
-  } else if (sessions.length === 0) {
+  } else if (sessionsCount === 0) {
     guidance = "Log labor time to calculate labor costs.";
   } else if (!hasLaborRateForSessions) {
     guidance = "Add labor rates to calculate totals.";
