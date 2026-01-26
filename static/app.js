@@ -1,5 +1,7 @@
 const API_BASE = window.location.origin;
 
+const API_KEY_STORAGE = "rmt_api_key";
+
 const RESOURCES = [
   {
     key: "tasks",
@@ -152,6 +154,7 @@ const state = {
 
 const ui = {
   serverBase: document.getElementById("server-base"),
+  apiKeyInput: document.getElementById("api-key"),
   projectList: document.getElementById("project-list"),
   projectSearch: document.getElementById("project-search"),
   projectTitle: document.getElementById("project-title"),
@@ -197,6 +200,19 @@ const ui = {
 
 ui.serverBase.textContent = API_BASE;
 
+function getApiKey() {
+  return localStorage.getItem(API_KEY_STORAGE) || "";
+}
+
+function setApiKey(value) {
+  const trimmed = value.trim();
+  if (trimmed) {
+    localStorage.setItem(API_KEY_STORAGE, trimmed);
+  } else {
+    localStorage.removeItem(API_KEY_STORAGE);
+  }
+}
+
 function showToast(message, type = "success") {
   const toast = document.createElement("div");
   toast.className = `toast ${type}`;
@@ -219,10 +235,23 @@ function showSkeleton() {
   ui.tableWrap.appendChild(skeleton);
 }
 
-async function fetchJson(url, options) {
-  const response = await fetch(url, options);
+async function fetchJson(url, options = {}) {
+  const requestOptions = { ...options };
+  const method = (requestOptions.method || "GET").toUpperCase();
+  const headers = new Headers(requestOptions.headers || {});
+  if (method !== "GET") {
+    const apiKey = getApiKey();
+    if (apiKey) {
+      headers.set("X-API-Key", apiKey);
+    }
+  }
+  requestOptions.headers = headers;
+  const response = await fetch(url, requestOptions);
   const payload = await response.json();
   if (!response.ok) {
+    if (response.status === 401 || response.status === 403) {
+      showToast(payload.error || "Authentication failed.", "error");
+    }
     throw new Error(payload.error || "Request failed.");
   }
   return payload;
@@ -1705,6 +1734,14 @@ ui.refreshAll.addEventListener("click", async () => {
   updateProjectSummary();
   loadList();
 });
+
+if (ui.apiKeyInput) {
+  ui.apiKeyInput.value = getApiKey();
+  ui.apiKeyInput.addEventListener("change", (event) => {
+    setApiKey(event.target.value);
+    showToast("API key saved.");
+  });
+}
 
 async function refreshStatusPanel() {
   try {
