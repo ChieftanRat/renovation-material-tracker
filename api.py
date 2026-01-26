@@ -1060,35 +1060,53 @@ class RenovationHandler(BaseHTTPRequestHandler):
             ).fetchone()[0]
             rows = conn.execute(
                 f"""
-                SELECT ws.id, ws.project_id, ws.task_id, ws.work_date, ws.archived_at
-                FROM work_sessions ws
-                {where_sql}
-                ORDER BY ws.id
-                LIMIT ? OFFSET ?
+                WITH paged_sessions AS (
+                    SELECT ws.id, ws.project_id, ws.task_id, ws.work_date, ws.archived_at
+                    FROM work_sessions ws
+                    {where_sql}
+                    ORDER BY ws.id
+                    LIMIT ? OFFSET ?
+                )
+                SELECT
+                    ps.id,
+                    ps.project_id,
+                    ps.task_id,
+                    ps.work_date,
+                    ps.archived_at,
+                    wse.id AS entry_id,
+                    wse.laborer_id,
+                    wse.clock_in_time,
+                    wse.clock_out_time
+                FROM paged_sessions ps
+                LEFT JOIN work_session_entries wse ON wse.work_session_id = ps.id
+                ORDER BY ps.id, wse.id
                 """,
                 params + [page_size, offset],
             ).fetchall()
-            session_ids = [row["id"] for row in rows]
-            entries = []
-            if session_ids:
-                placeholders = ",".join("?" for _ in session_ids)
-                entries = conn.execute(
-                    f"""
-                    SELECT work_session_id, laborer_id, clock_in_time, clock_out_time
-                    FROM work_session_entries
-                    WHERE work_session_id IN ({placeholders})
-                    ORDER BY id
-                    """,
-                    session_ids,
-                ).fetchall()
-        entries_by_session = {}
-        for entry in entries:
-            entries_by_session.setdefault(entry["work_session_id"], []).append(dict(entry))
-        payload_rows = []
+        sessions = {}
+        ordered_ids = []
         for row in rows:
-            data = dict(row)
-            data["entries"] = entries_by_session.get(row["id"], [])
-            payload_rows.append(data)
+            session_id = row["id"]
+            if session_id not in sessions:
+                sessions[session_id] = {
+                    "id": session_id,
+                    "project_id": row["project_id"],
+                    "task_id": row["task_id"],
+                    "work_date": row["work_date"],
+                    "archived_at": row["archived_at"],
+                    "entries": [],
+                }
+                ordered_ids.append(session_id)
+            if row["entry_id"] is not None:
+                sessions[session_id]["entries"].append(
+                    {
+                        "id": row["entry_id"],
+                        "laborer_id": row["laborer_id"],
+                        "clock_in_time": row["clock_in_time"],
+                        "clock_out_time": row["clock_out_time"],
+                    }
+                )
+        payload_rows = [sessions[session_id] for session_id in ordered_ids]
         total_pages = (total + page_size - 1) // page_size if page_size else 0
         send_json(
             self,
