@@ -3,6 +3,7 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta http-equiv="Content-Security-Policy" content="script-src 'self'" />
     <title>Renovation Material Tracker</title>
     <link rel="stylesheet" href="/static/styles.css" />
   </head>
@@ -29,6 +30,10 @@
             autocomplete="off"
             placeholder="Optional"
           />
+          <label class="toggle">
+            <input type="checkbox" id="remember-api-key" />
+            <span>Remember on this device</span>
+          </label>
         </div>
       </div>
     </header>
