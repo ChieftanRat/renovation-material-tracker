@@ -13,6 +13,19 @@ API_AUTH_SECRET = os.environ.get("RENOVATION_API_KEY")
 MAX_CONTENT_LENGTH = int(os.environ.get("MAX_CONTENT_LENGTH", str(2 * 1024 * 1024)))
 SERVER_TIMEOUT = float(os.environ.get("SERVER_TIMEOUT", "10"))
 LOG_LEVEL = os.environ.get("LOG_LEVEL", "INFO").upper()
+
+
+def parse_env_int(name, default):
+    raw_value = os.environ.get(name)
+    if raw_value is None:
+        return default
+    try:
+        return int(raw_value)
+    except ValueError:
+        return default
+
+
+BACKUP_RETENTION_DAYS = parse_env_int("BACKUP_RETENTION_DAYS", 30)
 logging.basicConfig(
     level=getattr(logging, LOG_LEVEL, logging.INFO),
     format="%(asctime)s %(levelname)s %(name)s %(message)s",
@@ -161,6 +174,37 @@ def rows_to_dicts(cursor):
     return [dict(zip(columns, row)) for row in cursor.fetchall()]
 
 
+def get_latest_backup_timestamp():
+    backup_dir = os.path.join(os.path.dirname(__file__), "backups")
+    try:
+        entries = [os.path.join(backup_dir, name) for name in os.listdir(backup_dir)]
+    except FileNotFoundError:
+        return None
+    newest_mtime = None
+    for path in entries:
+        if not os.path.isfile(path):
+            continue
+        try:
+            mtime = os.path.getmtime(path)
+        except OSError:
+            continue
+        if newest_mtime is None or mtime > newest_mtime:
+            newest_mtime = mtime
+    if newest_mtime is None:
+        return None
+    return datetime.utcfromtimestamp(newest_mtime).isoformat(timespec="seconds")
+
+
+def get_migration_count():
+    with get_db() as conn:
+        table = conn.execute(
+            "SELECT name FROM sqlite_master WHERE type='table' AND name='schema_migrations'"
+        ).fetchone()
+        if not table:
+            return 0
+        return conn.execute("SELECT COUNT(*) FROM schema_migrations").fetchone()[0]
+
+
 class RenovationHandler(BaseHTTPRequestHandler):
     def do_GET(self):
         parsed = urlparse(self.path)
@@ -177,6 +221,16 @@ class RenovationHandler(BaseHTTPRequestHandler):
             return
         if parsed.path == "/health":
             send_json(self, 200, {"status": "ok"})
+            return
+        if parsed.path == "/backups":
+            payload = {
+                "last_backup_at": get_latest_backup_timestamp(),
+                "retention_days": BACKUP_RETENTION_DAYS,
+            }
+            send_json(self, 200, payload)
+            return
+        if parsed.path == "/migrations":
+            send_json(self, 200, {"count": get_migration_count()})
             return
         routes = {
             "/projects": self.handle_get_projects,
