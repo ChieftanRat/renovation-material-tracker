@@ -1,18 +1,22 @@
 import json
+import logging
 import os
 import sqlite3
-from datetime import date, datetime, time, timedelta
-from http.server import BaseHTTPRequestHandler, HTTPServer
+from datetime import date, datetime, time
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, urlparse
 
 
-BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-DB_PATH = os.environ.get("RENOVATION_DB", os.path.join(BASE_DIR, "renovation.db"))
-STATIC_DIR = os.path.join(BASE_DIR, "static")
-BACKUP_DIR = os.environ.get("RENOVATION_BACKUPS", os.path.join(BASE_DIR, "backups"))
-BACKUP_INTERVAL = timedelta(minutes=10)
-BACKUP_RETENTION_DAYS = int(os.environ.get("RENOVATION_BACKUP_RETENTION_DAYS", "30"))
-_LAST_BACKUP_AT = None
+DB_PATH = os.environ.get("RENOVATION_DB", "renovation.db")
+API_AUTH_SECRET = os.environ.get("RENOVATION_API_KEY")
+MAX_CONTENT_LENGTH = int(os.environ.get("MAX_CONTENT_LENGTH", str(2 * 1024 * 1024)))
+SERVER_TIMEOUT = float(os.environ.get("SERVER_TIMEOUT", "10"))
+LOG_LEVEL = os.environ.get("LOG_LEVEL", "INFO").upper()
+logging.basicConfig(
+    level=getattr(logging, LOG_LEVEL, logging.INFO),
+    format="%(asctime)s %(levelname)s %(name)s %(message)s",
+)
+LOGGER = logging.getLogger("renovation.api")
 
 
 def get_db():
@@ -23,17 +27,29 @@ def get_db():
 
 
 def read_json(handler):
-    length = int(handler.headers.get("Content-Length", 0))
+    length_header = handler.headers.get("Content-Length")
+    if length_header is None:
+        return None, "Request body required.", 400
+    try:
+        length = int(length_header)
+    except ValueError:
+        return None, "Invalid Content-Length header.", 400
     if length <= 0:
-        return None, "Request body required."
+        return None, "Request body required.", 400
+    if length > MAX_CONTENT_LENGTH:
+        return (
+            None,
+            f"Request body must be {MAX_CONTENT_LENGTH} bytes or less.",
+            413,
+        )
     try:
         payload = handler.rfile.read(length)
         data = json.loads(payload.decode("utf-8"))
         if not isinstance(data, dict):
-            return None, "JSON body must be an object."
-        return data, None
-    except json.JSONDecodeError:
-        return None, "Invalid JSON payload."
+            return None, "JSON body must be an object.", 400
+        return data, None, 200
+    except (json.JSONDecodeError, UnicodeDecodeError):
+        return None, "Invalid JSON payload.", 400
 
 
 def send_json(handler, status, payload):
@@ -43,6 +59,26 @@ def send_json(handler, status, payload):
     handler.send_header("Content-Length", str(len(body)))
     handler.end_headers()
     handler.wfile.write(body)
+    LOGGER.info("%s %s -> %s", handler.command, handler.path, status)
+
+
+def require_auth(handler):
+    if not API_AUTH_SECRET:
+        LOGGER.error("RENOVATION_API_KEY is not configured.")
+        send_json(handler, 403, {"error": "API key not configured."})
+        return False
+    api_key = handler.headers.get("X-API-Key")
+    auth_header = handler.headers.get("Authorization", "")
+    bearer = None
+    if auth_header.lower().startswith("bearer "):
+        bearer = auth_header[7:].strip()
+    if not api_key and not bearer:
+        send_json(handler, 401, {"error": "Authentication required."})
+        return False
+    if api_key == API_AUTH_SECRET or bearer == API_AUTH_SECRET:
+        return True
+    send_json(handler, 403, {"error": "Invalid credentials."})
+    return False
 
 
 def send_file(handler, status, content, content_type):
@@ -95,342 +131,58 @@ def ensure_non_negative(value, field):
     return number
 
 
-def parse_positive_int(value, field, default, minimum=1, maximum=200):
-    if value is None:
-        return default
-    try:
-        number = int(value)
-    except (TypeError, ValueError):
-        raise ValueError(f"{field} must be an integer.")
-    if number < minimum or number > maximum:
-        raise ValueError(f"{field} must be between {minimum} and {maximum}.")
-    return number
+def parse_pagination(query):
+    params = parse_qs(query)
 
-
-def parse_optional_int(value, field):
-    if value is None:
-        return None
-    try:
-        return int(value)
-    except (TypeError, ValueError):
-        raise ValueError(f"{field} must be an integer.")
-
-
-def parse_optional_date(value, field):
-    if value is None:
-        return None
-    parse_date(value, field)
-    return value
-
-
-def parse_bool(value):
-    if value is None:
-        return False
-    return str(value).lower() in ("1", "true", "yes", "on")
-
-
-def rows_to_dicts(rows):
-    return [dict(row) for row in rows]
-
-
-def get_query_value(query, key):
-    return query.get(key, [None])[0]
-
-
-def build_filters(query, filters):
-    clauses = []
-    params = []
-    for param, column, value_type in filters:
-        raw_value = get_query_value(query, param)
-        if value_type == "int":
-            value = parse_optional_int(raw_value, param)
-        elif value_type == "date":
-            value = parse_optional_date(raw_value, param)
-        else:
-            value = raw_value
-        if value is None:
-            continue
-        if value_type == "date":
-            if param == "start_date":
-                clauses.append(f"{column} >= ?")
-            elif param == "end_date":
-                clauses.append(f"{column} <= ?")
-            else:
-                clauses.append(f"{column} = ?")
-        else:
-            clauses.append(f"{column} = ?")
-        params.append(value)
-    if not clauses:
-        return "", []
-    return " WHERE " + " AND ".join(clauses), params
-
-
-def maybe_backup_db(force=False):
-    global _LAST_BACKUP_AT
-    now = datetime.utcnow()
-    if not force and _LAST_BACKUP_AT and now - _LAST_BACKUP_AT < BACKUP_INTERVAL:
-        return
-    os.makedirs(BACKUP_DIR, exist_ok=True)
-    timestamp = now.strftime("%Y%m%d_%H%M%S")
-    backup_path = os.path.join(BACKUP_DIR, f"backup_{timestamp}.db")
-    with sqlite3.connect(DB_PATH) as source:
-        with sqlite3.connect(backup_path) as dest:
-            source.backup(dest)
-    _LAST_BACKUP_AT = now
-    purge_old_backups(now)
-
-
-def purge_old_backups(now):
-    cutoff = now - timedelta(days=BACKUP_RETENTION_DAYS)
-    for name in os.listdir(BACKUP_DIR):
-        if not name.startswith("backup_") or not name.endswith(".db"):
-            continue
-        path = os.path.join(BACKUP_DIR, name)
+    def parse_int(name, default):
+        if name not in params:
+            return default
+        values = params[name]
+        if len(values) != 1 or not values[0]:
+            raise ValueError(f"{name} must be a non-negative integer.")
         try:
-            mtime = datetime.utcfromtimestamp(os.path.getmtime(path))
-        except OSError:
-            continue
-        if mtime < cutoff:
-            try:
-                os.remove(path)
-            except OSError:
-                continue
+            number = int(values[0])
+        except ValueError:
+            raise ValueError(f"{name} must be a non-negative integer.")
+        if number < 0:
+            raise ValueError(f"{name} must be a non-negative integer.")
+        return number
+
+    limit = parse_int("limit", 100)
+    offset = parse_int("offset", 0)
+    return limit, offset
+
+
+def rows_to_dicts(cursor):
+    columns = [col[0] for col in cursor.description]
+    return [dict(zip(columns, row)) for row in cursor.fetchall()]
 
 
 class RenovationHandler(BaseHTTPRequestHandler):
     def do_GET(self):
         parsed = urlparse(self.path)
-        if parsed.path in ("/", "/index.html"):
-            index_path = os.path.join(STATIC_DIR, "index.html")
-            if os.path.exists(index_path):
-                with open(index_path, "rb") as file_handle:
-                    content = file_handle.read()
-                send_file(self, 200, content, "text/html; charset=utf-8")
-                return
         if parsed.path == "/health":
             send_json(self, 200, {"status": "ok"})
             return
-        if parsed.path == "/migrations":
-            with get_db() as conn:
-                rows = conn.execute(
-                    "SELECT name, applied_at FROM schema_migrations ORDER BY applied_at"
-                ).fetchall()
-            send_json(
-                self,
-                200,
-                {"applied": rows_to_dicts(rows), "count": len(rows)},
-            )
-            return
-        if parsed.path == "/backups":
-            send_json(
-                self,
-                200,
-                {
-                    "directory": BACKUP_DIR,
-                    "retention_days": BACKUP_RETENTION_DAYS,
-                    "last_backup_at": _LAST_BACKUP_AT.isoformat(timespec="seconds")
-                    if _LAST_BACKUP_AT
-                    else None,
-                },
-            )
-            return
-        if parsed.path.startswith("/static/"):
-            relative = os.path.normpath(parsed.path.lstrip("/"))
-            if ".." in relative or relative.startswith("\\") or relative.startswith("/"):
-                send_json(self, 400, {"error": "Invalid path."})
-                return
-            file_path = os.path.join(BASE_DIR, relative)
-            if not file_path.startswith(STATIC_DIR):
-                send_json(self, 404, {"error": "Not found."})
-                return
-            if not os.path.isfile(file_path):
-                send_json(self, 404, {"error": "Not found."})
-                return
-            ext = os.path.splitext(file_path)[1].lower()
-            content_type = {
-                ".css": "text/css; charset=utf-8",
-                ".js": "text/javascript; charset=utf-8",
-                ".html": "text/html; charset=utf-8",
-                ".svg": "image/svg+xml",
-            }.get(ext, "application/octet-stream")
-            with open(file_path, "rb") as file_handle:
-                content = file_handle.read()
-            send_file(self, 200, content, content_type)
-            return
-        list_routes = {
-            "/projects": {
-                "table": "projects",
-                "order_by": "id",
-                "archivable": True,
-                "filters": [
-                    ("start_date", "start_date", "date"),
-                    ("end_date", "end_date", "date"),
-                ],
-            },
-            "/tasks": {
-                "table": "tasks",
-                "order_by": "id",
-                "archivable": True,
-                "filters": [
-                    ("project_id", "project_id", "int"),
-                    ("start_date", "date(start_datetime)", "date"),
-                    ("end_date", "date(start_datetime)", "date"),
-                ],
-            },
-            "/vendors": {
-                "table": "vendors",
-                "order_by": "id",
-                "archivable": True,
-                "filters": [],
-            },
-            "/material-purchases": {
-                "table": "material_purchases",
-                "order_by": "id",
-                "archivable": True,
-                "filters": [
-                    ("project_id", "project_id", "int"),
-                    ("vendor_id", "vendor_id", "int"),
-                    ("task_id", "task_id", "int"),
-                    ("start_date", "purchase_date", "date"),
-                    ("end_date", "purchase_date", "date"),
-                ],
-            },
-            "/laborers": {
-                "table": "laborers",
-                "order_by": "id",
-                "archivable": True,
-                "filters": [],
-            },
-            "/work-sessions": {
-                "table": "work_sessions",
-                "order_by": "id",
-                "archivable": True,
-                "filters": [
-                    ("project_id", "project_id", "int"),
-                    ("laborer_id", "laborer_id", "int"),
-                    ("task_id", "task_id", "int"),
-                    ("start_date", "work_date", "date"),
-                    ("end_date", "work_date", "date"),
-                ],
-            },
-        }
-        route = list_routes.get(parsed.path)
-        if not route:
-            send_json(self, 404, {"error": "Not found."})
-            return
-        try:
-            query = parse_qs(parsed.query)
-            page = parse_positive_int(query.get("page", [None])[0], "page", 1, minimum=1)
-            page_size = parse_positive_int(
-                query.get("page_size", [None])[0], "page_size", 25, minimum=1, maximum=200
-            )
-            if parsed.path == "/work-sessions":
-                include_archived = parse_bool(query.get("include_archived", [None])[0])
-                self.handle_work_sessions_list(query, page, page_size, include_archived)
-                return
-            table = route["table"]
-            order_by = route["order_by"]
-            include_archived = parse_bool(query.get("include_archived", [None])[0])
-            offset = (page - 1) * page_size
-            with get_db() as conn:
-                where_sql, params = build_filters(query, route["filters"])
-                if route.get("archivable") and not include_archived:
-                    if where_sql:
-                        where_sql += " AND archived_at IS NULL"
-                    else:
-                        where_sql = " WHERE archived_at IS NULL"
-                total = conn.execute(
-                    f"SELECT COUNT(*) FROM {table}{where_sql}",
-                    params,
-                ).fetchone()[0]
-                rows = conn.execute(
-                    f"SELECT * FROM {table}{where_sql} ORDER BY {order_by} LIMIT ? OFFSET ?",
-                    params + [page_size, offset],
-                ).fetchall()
-            total_pages = (total + page_size - 1) // page_size if page_size else 0
-            send_json(
-                self,
-                200,
-                {
-                    "data": rows_to_dicts(rows),
-                    "page": page,
-                    "page_size": page_size,
-                    "total": total,
-                    "total_pages": total_pages,
-                },
-            )
-        except ValueError as exc:
-            send_json(self, 400, {"error": str(exc)})
-
-    def do_PUT(self):
-        parsed = urlparse(self.path)
-        parts = parsed.path.strip("/").split("/")
-        if len(parts) != 2:
-            send_json(self, 404, {"error": "Not found."})
-            return
-        resource, raw_id = parts
-        try:
-            record_id = int(raw_id)
-        except ValueError:
-            send_json(self, 400, {"error": "Invalid id."})
-            return
         routes = {
-            "projects": self.update_project,
-            "tasks": self.update_task,
-            "material-purchases": self.update_material_purchase,
-            "work-sessions": self.update_work_session,
-            "vendors": self.update_vendor,
-            "laborers": self.update_laborer,
+            "/projects": self.handle_get_projects,
+            "/tasks": self.handle_get_tasks,
+            "/material-purchases": self.handle_get_material_purchases,
+            "/laborers": self.handle_get_laborers,
+            "/work-sessions": self.handle_get_work_sessions,
         }
-        handler = routes.get(resource)
+        handler = routes.get(parsed.path)
         if not handler:
             send_json(self, 404, {"error": "Not found."})
             return
-        data, error = read_json(self)
-        if error:
-            send_json(self, 400, {"error": error})
-            return
         try:
-            handler(record_id, data)
-            maybe_backup_db()
-        except sqlite3.IntegrityError as exc:
-            send_json(self, 400, {"error": str(exc)})
+            limit, offset = parse_pagination(parsed.query)
+            handler(limit, offset)
         except ValueError as exc:
             send_json(self, 400, {"error": str(exc)})
         except Exception:
+            LOGGER.exception("Unhandled error handling %s %s", self.command, self.path)
             send_json(self, 500, {"error": "Unexpected server error."})
-
-    def do_DELETE(self):
-        parsed = urlparse(self.path)
-        parts = parsed.path.strip("/").split("/")
-        if len(parts) != 2:
-            send_json(self, 404, {"error": "Not found."})
-            return
-        resource, raw_id = parts
-        try:
-            record_id = int(raw_id)
-        except ValueError:
-            send_json(self, 400, {"error": "Invalid id."})
-            return
-        tables = {
-            "projects": "projects",
-            "tasks": "tasks",
-            "material-purchases": "material_purchases",
-            "work-sessions": "work_sessions",
-            "vendors": "vendors",
-            "laborers": "laborers",
-        }
-        table = tables.get(resource)
-        if not table:
-            send_json(self, 404, {"error": "Not found."})
-            return
-        with get_db() as conn:
-            cursor = conn.execute(f"DELETE FROM {table} WHERE id = ?", (record_id,))
-        if cursor.rowcount == 0:
-            send_json(self, 404, {"error": "Not found."})
-            return
-        maybe_backup_db()
-        send_json(self, 200, {"id": record_id})
 
     def do_POST(self):
         routes = {
@@ -489,9 +241,11 @@ class RenovationHandler(BaseHTTPRequestHandler):
         if not handler:
             send_json(self, 404, {"error": "Not found."})
             return
-        data, error = read_json(self)
+        if not require_auth(self):
+            return
+        data, error, status = read_json(self)
         if error:
-            send_json(self, 400, {"error": error})
+            send_json(self, status, {"error": error})
             return
         try:
             handler(data)
@@ -501,7 +255,95 @@ class RenovationHandler(BaseHTTPRequestHandler):
         except ValueError as exc:
             send_json(self, 400, {"error": str(exc)})
         except Exception:
+            LOGGER.exception("Unhandled error handling %s %s", self.command, self.path)
             send_json(self, 500, {"error": "Unexpected server error."})
+
+    def handle_get_projects(self, limit, offset):
+        with get_db() as conn:
+            cursor = conn.execute(
+                """
+                SELECT id, name, description, start_date, end_date
+                FROM projects
+                ORDER BY id
+                LIMIT ? OFFSET ?
+                """,
+                (limit, offset),
+            )
+            items = rows_to_dicts(cursor)
+        send_json(self, 200, {"items": items, "limit": limit, "offset": offset})
+
+    def handle_get_tasks(self, limit, offset):
+        with get_db() as conn:
+            cursor = conn.execute(
+                """
+                SELECT id, project_id, name, start_datetime, end_datetime
+                FROM tasks
+                ORDER BY id
+                LIMIT ? OFFSET ?
+                """,
+                (limit, offset),
+            )
+            items = rows_to_dicts(cursor)
+        send_json(self, 200, {"items": items, "limit": limit, "offset": offset})
+
+    def handle_get_material_purchases(self, limit, offset):
+        with get_db() as conn:
+            cursor = conn.execute(
+                """
+                SELECT
+                  id,
+                  project_id,
+                  task_id,
+                  vendor_id,
+                  material_description,
+                  unit_cost,
+                  quantity,
+                  total_material_cost,
+                  delivery_cost,
+                  purchase_date
+                FROM material_purchases
+                ORDER BY id
+                LIMIT ? OFFSET ?
+                """,
+                (limit, offset),
+            )
+            items = rows_to_dicts(cursor)
+        send_json(self, 200, {"items": items, "limit": limit, "offset": offset})
+
+    def handle_get_laborers(self, limit, offset):
+        with get_db() as conn:
+            cursor = conn.execute(
+                """
+                SELECT id, name, hourly_rate, daily_rate
+                FROM laborers
+                ORDER BY id
+                LIMIT ? OFFSET ?
+                """,
+                (limit, offset),
+            )
+            items = rows_to_dicts(cursor)
+        send_json(self, 200, {"items": items, "limit": limit, "offset": offset})
+
+    def handle_get_work_sessions(self, limit, offset):
+        with get_db() as conn:
+            cursor = conn.execute(
+                """
+                SELECT
+                  id,
+                  laborer_id,
+                  project_id,
+                  task_id,
+                  work_date,
+                  clock_in_time,
+                  clock_out_time
+                FROM work_sessions
+                ORDER BY id
+                LIMIT ? OFFSET ?
+                """,
+                (limit, offset),
+            )
+            items = rows_to_dicts(cursor)
+        send_json(self, 200, {"items": items, "limit": limit, "offset": offset})
 
     def handle_projects(self, data):
         error = require_fields(data, ["name"])
@@ -1003,13 +845,21 @@ class RenovationHandler(BaseHTTPRequestHandler):
         )
 
     def log_message(self, format, *args):
-        return
+        LOGGER.info(
+            "%s - - [%s] %s",
+            self.client_address[0],
+            self.log_date_time_string(),
+            format % args,
+        )
 
 
 def run():
+    host = os.environ.get("HOST", "127.0.0.1")
     port = int(os.environ.get("PORT", "8000"))
-    server = HTTPServer(("0.0.0.0", port), RenovationHandler)
-    print(f"API listening on http://localhost:{port}")
+    server = ThreadingHTTPServer((host, port), RenovationHandler)
+    server.timeout = SERVER_TIMEOUT
+    server.socket.settimeout(SERVER_TIMEOUT)
+    print(f"API listening on http://{host}:{port}")
     server.serve_forever()
 
 

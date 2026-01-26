@@ -76,12 +76,16 @@ CREATE TABLE work_session_entries (
 );
 
 CREATE INDEX idx_tasks_project_id ON tasks(project_id);
+CREATE INDEX idx_tasks_start_datetime ON tasks(start_datetime);
+CREATE INDEX idx_tasks_project_start_datetime ON tasks(project_id, start_datetime);
 CREATE INDEX idx_material_purchases_project_id ON material_purchases(project_id);
 CREATE INDEX idx_material_purchases_vendor_id ON material_purchases(vendor_id);
+CREATE INDEX idx_material_purchases_purchase_date ON material_purchases(purchase_date);
+CREATE INDEX idx_material_purchases_project_purchase_date ON material_purchases(project_id, purchase_date);
 CREATE INDEX idx_work_sessions_project_id ON work_sessions(project_id);
-CREATE INDEX idx_work_sessions_task_id ON work_sessions(task_id);
-CREATE INDEX idx_work_session_entries_session_id ON work_session_entries(work_session_id);
-CREATE INDEX idx_work_session_entries_laborer_id ON work_session_entries(laborer_id);
+CREATE INDEX idx_work_sessions_laborer_id ON work_sessions(laborer_id);
+CREATE INDEX idx_work_sessions_work_date ON work_sessions(work_date);
+CREATE INDEX idx_work_sessions_project_work_date ON work_sessions(project_id, work_date);
 
 CREATE TRIGGER material_purchases_total_cost_insert
 AFTER INSERT ON material_purchases

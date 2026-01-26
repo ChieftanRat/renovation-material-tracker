@@ -10,6 +10,19 @@ The initial schema lives in [`schema.sql`](schema.sql) and targets SQLite-compat
 sqlite3 renovation.db < schema.sql
 ```
 
+### Migration Notes
+
+Indexes were added to accelerate common date-based lookups, along with composite `(project_id, date)` indexes to support frequent project-scoped filtering:
+
+```sql
+CREATE INDEX idx_tasks_start_datetime ON tasks(start_datetime);
+CREATE INDEX idx_tasks_project_start_datetime ON tasks(project_id, start_datetime);
+CREATE INDEX idx_material_purchases_purchase_date ON material_purchases(purchase_date);
+CREATE INDEX idx_material_purchases_project_purchase_date ON material_purchases(project_id, purchase_date);
+CREATE INDEX idx_work_sessions_work_date ON work_sessions(work_date);
+CREATE INDEX idx_work_sessions_project_work_date ON work_sessions(project_id, work_date);
+```
+
 ## Seed Data
 
 Reference data lives in [`seed.sql`](seed.sql). After creating the schema:
@@ -29,7 +42,7 @@ sqlite3 renovation.db
 
 ## API Layer
 
-The API server is a lightweight HTTP service (no external dependencies) for capturing entries with validation.
+The API server is a lightweight HTTP service (no external dependencies) for capturing entries with validation. It uses Python's `ThreadingHTTPServer` to handle concurrent requests, and each request opens its own SQLite connection via `get_db()` to keep database access thread-safe.
 
 ```sh
 python api.py
@@ -37,22 +50,50 @@ python api.py
 
 Environment variables:
 - `RENOVATION_DB` to point at a different SQLite file.
+- `HOST` to control the bind address (defaults to `127.0.0.1`). Use `HOST=0.0.0.0` to expose the API outside the local machine (for example, inside containers).
 - `PORT` to change the listening port (default 8000).
-- `RENOVATION_BACKUPS` to set the backup folder (default `backups/`).
-- `RENOVATION_BACKUP_RETENTION_DAYS` to set how long backups are kept (default 30 days).
+- `LOG_LEVEL` to control logging verbosity (defaults to `INFO`).
+- `RENOVATION_API_KEY` to require an API key or bearer token for POST requests.
+- `MAX_CONTENT_LENGTH` to cap JSON request bodies in bytes (default 2097152 / 2 MB).
+- `SERVER_TIMEOUT` to set the server socket timeout in seconds (default 10).
+
+For production deployments, set `HOST=0.0.0.0` (or an explicit interface) only when you intend to expose the service, and keep it behind a reverse proxy or firewall. The default `127.0.0.1` bind keeps the API limited to local requests for safer development by default.
+Requests with a `Content-Length` larger than the configured `MAX_CONTENT_LENGTH` are rejected with HTTP 413 responses.
 
 Example requests:
 
 ```sh
 curl -X POST http://localhost:8000/projects ^
   -H "Content-Type: application/json" ^
+  -H "X-API-Key: your-secret-key" ^
   -d "{\"name\":\"Kitchen Refresh\",\"start_date\":\"2025-01-05\"}"
 ```
 
 ```sh
 curl -X POST http://localhost:8000/material-purchases ^
   -H "Content-Type: application/json" ^
+  -H "Authorization: Bearer your-secret-key" ^
   -d "{\"project_id\":1,\"vendor_id\":1,\"material_description\":\"Tile\",\"unit_cost\":2.4,\"quantity\":180,\"delivery_cost\":45,\"purchase_date\":\"2025-01-11\"}"
+```
+
+```sh
+curl "http://localhost:8000/projects?limit=10&offset=0"
+```
+
+```sh
+curl "http://localhost:8000/tasks?limit=10&offset=0"
+```
+
+```sh
+curl "http://localhost:8000/material-purchases?limit=10&offset=0"
+```
+
+```sh
+curl "http://localhost:8000/laborers?limit=10&offset=0"
+```
+
+```sh
+curl "http://localhost:8000/work-sessions?limit=10&offset=0"
 ```
 
 ## Next Steps
