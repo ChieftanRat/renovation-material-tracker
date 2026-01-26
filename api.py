@@ -378,6 +378,18 @@ class RenovationHandler(BaseHTTPRequestHandler):
         if parsed.path == "/migrations":
             send_json(self, 200, {"count": get_migration_count()})
             return
+        if parsed.path.startswith("/projects/") and parsed.path.endswith("/summary"):
+            parts = parsed.path.strip("/").split("/")
+            if len(parts) != 3 or parts[2] != "summary":
+                send_json(self, 404, {"error": "Not found."})
+                return
+            try:
+                project_id = int(parts[1])
+            except ValueError:
+                send_json(self, 400, {"error": "Invalid id."})
+                return
+            self.handle_project_summary(project_id)
+            return
         routes = {
             "/projects": self.handle_get_projects,
             "/tasks": self.handle_get_tasks,
@@ -757,6 +769,82 @@ class RenovationHandler(BaseHTTPRequestHandler):
         if project_id is None:
             raise ValueError("project_id is required.")
         self.handle_work_sessions_list(query, page, page_size, include_archived)
+
+    def handle_project_summary(self, project_id):
+        with get_db() as conn:
+            exists = conn.execute(
+                "SELECT 1 FROM projects WHERE id = ?",
+                (project_id,),
+            ).fetchone()
+            if not exists:
+                send_json(self, 404, {"error": "Not found."})
+                return
+            row = conn.execute(
+                """
+                SELECT
+                  (SELECT COUNT(*)
+                   FROM tasks
+                   WHERE project_id = ? AND archived_at IS NULL) AS tasks_count,
+                  (SELECT COUNT(*)
+                   FROM material_purchases
+                   WHERE project_id = ? AND archived_at IS NULL) AS purchases_count,
+                  (SELECT COALESCE(SUM(total_material_cost + delivery_cost), 0)
+                   FROM material_purchases
+                   WHERE project_id = ? AND archived_at IS NULL) AS material_total,
+                  (SELECT COUNT(*)
+                   FROM work_sessions
+                   WHERE project_id = ? AND archived_at IS NULL) AS sessions_count,
+                  (SELECT COALESCE(SUM(
+                    CASE
+                      WHEN l.hourly_rate IS NOT NULL THEN
+                        (julianday('2000-01-01 ' || e.clock_out_time) -
+                         julianday('2000-01-01 ' || e.clock_in_time)) * 24 * l.hourly_rate
+                      WHEN l.daily_rate IS NOT NULL THEN l.daily_rate
+                      ELSE 0
+                    END
+                  ), 0)
+                   FROM work_sessions ws
+                   JOIN work_session_entries e ON e.work_session_id = ws.id
+                   JOIN laborers l ON l.id = e.laborer_id
+                   WHERE ws.project_id = ? AND ws.archived_at IS NULL) AS labor_total,
+                  (SELECT CASE
+                    WHEN EXISTS (
+                      SELECT 1
+                      FROM work_sessions ws
+                      JOIN work_session_entries e ON e.work_session_id = ws.id
+                      JOIN laborers l ON l.id = e.laborer_id
+                      WHERE ws.project_id = ?
+                        AND ws.archived_at IS NULL
+                        AND (l.hourly_rate IS NOT NULL OR l.daily_rate IS NOT NULL)
+                    ) THEN 1
+                    ELSE 0
+                   END) AS has_labor_rates
+                """,
+                (
+                    project_id,
+                    project_id,
+                    project_id,
+                    project_id,
+                    project_id,
+                    project_id,
+                ),
+            ).fetchone()
+        material_total = row["material_total"] or 0
+        labor_total = row["labor_total"] or 0
+        send_json(
+            self,
+            200,
+            {
+                "project_id": project_id,
+                "material_total": material_total,
+                "labor_total": labor_total,
+                "combined_total": material_total + labor_total,
+                "tasks_count": row["tasks_count"] or 0,
+                "purchases_count": row["purchases_count"] or 0,
+                "sessions_count": row["sessions_count"] or 0,
+                "has_labor_rates": bool(row["has_labor_rates"]),
+            },
+        )
 
     def handle_projects(self, data):
         error = require_fields(data, ["name"])
