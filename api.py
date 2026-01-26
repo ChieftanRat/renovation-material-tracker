@@ -3,8 +3,9 @@ import logging
 import mimetypes
 import os
 import sqlite3
-from datetime import date, datetime, time
+from datetime import date, datetime, time, timedelta
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
 
@@ -32,6 +33,10 @@ logging.basicConfig(
     format="%(asctime)s %(levelname)s %(name)s %(message)s",
 )
 LOGGER = logging.getLogger("renovation.api")
+BASE_DIR = os.path.dirname(__file__)
+BACKUP_DIR = os.path.join(BASE_DIR, "backups")
+SCHEMA_PATH = os.path.join(BASE_DIR, "schema.sql")
+SEED_PATH = os.path.join(BASE_DIR, "seed.sql")
 
 
 def get_db():
@@ -247,9 +252,8 @@ def rows_to_dicts(cursor):
 
 
 def get_latest_backup_timestamp():
-    backup_dir = os.path.join(os.path.dirname(__file__), "backups")
     try:
-        entries = [os.path.join(backup_dir, name) for name in os.listdir(backup_dir)]
+        entries = [os.path.join(BACKUP_DIR, name) for name in os.listdir(BACKUP_DIR)]
     except FileNotFoundError:
         return None
     newest_mtime = None
@@ -265,6 +269,76 @@ def get_latest_backup_timestamp():
     if newest_mtime is None:
         return None
     return datetime.utcfromtimestamp(newest_mtime).isoformat(timespec="seconds")
+
+
+def get_latest_backup_mtime():
+    try:
+        entries = [os.path.join(BACKUP_DIR, name) for name in os.listdir(BACKUP_DIR)]
+    except FileNotFoundError:
+        return None
+    newest_mtime = None
+    for path in entries:
+        if not os.path.isfile(path):
+            continue
+        try:
+            mtime = os.path.getmtime(path)
+        except OSError:
+            continue
+        if newest_mtime is None or mtime > newest_mtime:
+            newest_mtime = mtime
+    if newest_mtime is None:
+        return None
+    return datetime.utcfromtimestamp(newest_mtime)
+
+
+def prune_old_backups():
+    if BACKUP_RETENTION_DAYS <= 0:
+        return
+    try:
+        entries = [os.path.join(BACKUP_DIR, name) for name in os.listdir(BACKUP_DIR)]
+    except FileNotFoundError:
+        return
+    cutoff = datetime.utcnow() - timedelta(days=BACKUP_RETENTION_DAYS)
+    for path in entries:
+        if not os.path.isfile(path):
+            continue
+        try:
+            mtime = datetime.utcfromtimestamp(os.path.getmtime(path))
+            if mtime < cutoff:
+                os.remove(path)
+        except OSError:
+            LOGGER.warning("Failed to prune backup %s", path)
+
+
+def write_backup(output_path):
+    from backup_export import export_backup
+
+    export_backup(
+        db_path=DB_PATH,
+        schema_path=SCHEMA_PATH,
+        seed_path=SEED_PATH,
+        output_path=output_path,
+        include_seed=False,
+    )
+
+
+def maybe_backup_db(force=False):
+    if BACKUP_RETENTION_DAYS <= 0:
+        return
+    try:
+        os.makedirs(BACKUP_DIR, exist_ok=True)
+        prune_old_backups()
+        last_backup = get_latest_backup_mtime()
+        if not force and last_backup:
+            if datetime.utcnow() - last_backup < timedelta(days=1):
+                return
+        timestamp = datetime.utcnow().strftime("%Y%m%d_%H%M%S")
+        output_path = Path(BACKUP_DIR) / f"backup_{timestamp}.sql"
+        write_backup(output_path)
+    except Exception:
+        LOGGER.exception("Failed to write backup")
+        if force:
+            raise
 
 
 def get_migration_count():
