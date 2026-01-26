@@ -95,6 +95,10 @@ def require_auth(handler):
     return False
 
 
+def require_mutation_auth(handler):
+    return require_auth(handler)
+
+
 def send_file(handler, status, content, content_type):
     handler.send_response(status)
     handler.send_header("Content-Type", content_type)
@@ -344,6 +348,8 @@ class RenovationHandler(BaseHTTPRequestHandler):
             "/work-sessions": self.handle_work_sessions,
         }
         if self.path == "/backups":
+            if not require_mutation_auth(self):
+                return
             try:
                 maybe_backup_db(force=True)
                 send_json(self, 200, {"status": "ok"})
@@ -372,6 +378,8 @@ class RenovationHandler(BaseHTTPRequestHandler):
                 record_id = int(raw_id)
             except ValueError:
                 send_json(self, 400, {"error": "Invalid id."})
+                return
+            if not require_mutation_auth(self):
                 return
             archived_at = None
             if action == "archive":
