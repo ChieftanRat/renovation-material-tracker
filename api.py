@@ -1,5 +1,6 @@
 import json
 import logging
+import mimetypes
 import os
 import sqlite3
 from datetime import date, datetime, time
@@ -161,6 +162,17 @@ def rows_to_dicts(cursor):
 class RenovationHandler(BaseHTTPRequestHandler):
     def do_GET(self):
         parsed = urlparse(self.path)
+        if parsed.path == "/":
+            self.serve_static_file("index.html")
+            return
+        if parsed.path == "/favicon.ico":
+            self.send_response(204)
+            self.end_headers()
+            return
+        if parsed.path.startswith("/static/"):
+            relative_path = parsed.path.removeprefix("/static/").lstrip("/")
+            self.serve_static_file(relative_path)
+            return
         if parsed.path == "/health":
             send_json(self, 200, {"status": "ok"})
             return
@@ -182,6 +194,27 @@ class RenovationHandler(BaseHTTPRequestHandler):
             send_json(self, 400, {"error": str(exc)})
         except Exception:
             LOGGER.exception("Unhandled error handling %s %s", self.command, self.path)
+            send_json(self, 500, {"error": "Unexpected server error."})
+
+    def serve_static_file(self, relative_path):
+        static_root = os.path.join(os.path.dirname(__file__), "static")
+        requested_path = os.path.normpath(os.path.join(static_root, relative_path))
+        if os.path.commonpath([static_root, requested_path]) != static_root:
+            send_json(self, 404, {"error": "Not found."})
+            return
+        if not os.path.isfile(requested_path):
+            send_json(self, 404, {"error": "Not found."})
+            return
+        content_type, _ = mimetypes.guess_type(requested_path)
+        if not content_type:
+            content_type = "application/octet-stream"
+        try:
+            with open(requested_path, "rb") as handle:
+                content = handle.read()
+            send_file(self, 200, content, content_type)
+            LOGGER.info("%s %s -> %s", self.command, self.path, 200)
+        except OSError:
+            LOGGER.exception("Failed to read static file %s", requested_path)
             send_json(self, 500, {"error": "Unexpected server error."})
 
     def do_POST(self):
@@ -415,7 +448,6 @@ class RenovationHandler(BaseHTTPRequestHandler):
             data,
             [
                 "project_id",
-                "task_id",
                 "vendor_id",
                 "material_description",
                 "unit_cost",

@@ -83,7 +83,6 @@ CREATE INDEX idx_material_purchases_vendor_id ON material_purchases(vendor_id);
 CREATE INDEX idx_material_purchases_purchase_date ON material_purchases(purchase_date);
 CREATE INDEX idx_material_purchases_project_purchase_date ON material_purchases(project_id, purchase_date);
 CREATE INDEX idx_work_sessions_project_id ON work_sessions(project_id);
-CREATE INDEX idx_work_sessions_laborer_id ON work_sessions(laborer_id);
 CREATE INDEX idx_work_sessions_work_date ON work_sessions(work_date);
 CREATE INDEX idx_work_sessions_project_work_date ON work_sessions(project_id, work_date);
 
