@@ -1769,8 +1769,16 @@ async function refreshStatusPanel() {
 
 async function init() {
   renderTabs();
-  await refreshLookups();
-  await refreshStatusPanel();
+  const [lookupsResult] = await Promise.allSettled([
+    refreshLookups(),
+    refreshStatusPanel(),
+  ]);
+  if (lookupsResult.status === "rejected") {
+    showToast(
+      "Unable to load project data. Check the API connection and refresh.",
+      "error"
+    );
+  }
   const firstProject = state.lookups.projects[0];
   if (firstProject) {
     setProject(firstProject);
