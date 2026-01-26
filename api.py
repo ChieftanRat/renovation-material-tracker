@@ -498,6 +498,70 @@ class RenovationHandler(BaseHTTPRequestHandler):
             LOGGER.exception("Unhandled error handling %s %s", self.command, self.path)
             send_json(self, 500, {"error": "Unexpected server error."})
 
+    def do_PUT(self):
+        parsed = urlparse(self.path)
+        resource, record_id = self.parse_resource_id(parsed.path)
+        if not resource:
+            return
+        routes = {
+            "projects": self.update_project,
+            "tasks": self.update_task,
+            "vendors": self.update_vendor,
+            "material-purchases": self.update_material_purchase,
+            "laborers": self.update_laborer,
+            "work-sessions": self.update_work_session,
+        }
+        handler = routes.get(resource)
+        if not handler:
+            send_json(self, 404, {"error": "Not found."})
+            return
+        if not require_mutation_auth(self):
+            return
+        data, error, status = read_json(self)
+        if error:
+            send_json(self, status, {"error": error})
+            return
+        try:
+            handler(record_id, data)
+            maybe_backup_db()
+        except sqlite3.IntegrityError as exc:
+            send_json(self, 400, {"error": str(exc)})
+        except ValueError as exc:
+            send_json(self, 400, {"error": str(exc)})
+        except Exception:
+            LOGGER.exception("Unhandled error handling %s %s", self.command, self.path)
+            send_json(self, 500, {"error": "Unexpected server error."})
+
+    def do_DELETE(self):
+        parsed = urlparse(self.path)
+        resource, record_id = self.parse_resource_id(parsed.path)
+        if not resource:
+            return
+        routes = {
+            "projects": self.delete_project,
+            "tasks": self.delete_task,
+            "vendors": self.delete_vendor,
+            "material-purchases": self.delete_material_purchase,
+            "laborers": self.delete_laborer,
+            "work-sessions": self.delete_work_session,
+        }
+        handler = routes.get(resource)
+        if not handler:
+            send_json(self, 404, {"error": "Not found."})
+            return
+        if not require_mutation_auth(self):
+            return
+        try:
+            handler(record_id)
+            maybe_backup_db()
+        except sqlite3.IntegrityError as exc:
+            send_json(self, 400, {"error": str(exc)})
+        except ValueError as exc:
+            send_json(self, 400, {"error": str(exc)})
+        except Exception:
+            LOGGER.exception("Unhandled error handling %s %s", self.command, self.path)
+            send_json(self, 500, {"error": "Unexpected server error."})
+
     def handle_get_projects(self, page, page_size, limit, offset):
         with get_db() as conn:
             total = conn.execute("SELECT COUNT(*) FROM projects").fetchone()[0]
@@ -1122,6 +1186,126 @@ class RenovationHandler(BaseHTTPRequestHandler):
             return
         send_json(self, 200, {"id": record_id})
 
+    def delete_project(self, record_id):
+        archived_at = datetime.utcnow().isoformat(timespec="seconds")
+        with get_db() as conn:
+            has_tasks = conn.execute(
+                "SELECT 1 FROM tasks WHERE project_id = ? LIMIT 1",
+                (record_id,),
+            ).fetchone()
+            has_purchases = conn.execute(
+                "SELECT 1 FROM material_purchases WHERE project_id = ? LIMIT 1",
+                (record_id,),
+            ).fetchone()
+            has_sessions = conn.execute(
+                "SELECT 1 FROM work_sessions WHERE project_id = ? LIMIT 1",
+                (record_id,),
+            ).fetchone()
+            if has_tasks or has_purchases or has_sessions:
+                cursor = conn.execute(
+                    "UPDATE projects SET archived_at = ? WHERE id = ?",
+                    (archived_at, record_id),
+                )
+                if cursor.rowcount == 0:
+                    send_json(self, 404, {"error": "Not found."})
+                    return
+                send_json(self, 200, {"id": record_id, "archived": True})
+                return
+            cursor = conn.execute("DELETE FROM projects WHERE id = ?", (record_id,))
+        if cursor.rowcount == 0:
+            send_json(self, 404, {"error": "Not found."})
+            return
+        send_json(self, 200, {"id": record_id, "deleted": True})
+
+    def delete_task(self, record_id):
+        archived_at = datetime.utcnow().isoformat(timespec="seconds")
+        with get_db() as conn:
+            has_purchases = conn.execute(
+                "SELECT 1 FROM material_purchases WHERE task_id = ? LIMIT 1",
+                (record_id,),
+            ).fetchone()
+            has_sessions = conn.execute(
+                "SELECT 1 FROM work_sessions WHERE task_id = ? LIMIT 1",
+                (record_id,),
+            ).fetchone()
+            if has_purchases or has_sessions:
+                cursor = conn.execute(
+                    "UPDATE tasks SET archived_at = ? WHERE id = ?",
+                    (archived_at, record_id),
+                )
+                if cursor.rowcount == 0:
+                    send_json(self, 404, {"error": "Not found."})
+                    return
+                send_json(self, 200, {"id": record_id, "archived": True})
+                return
+            cursor = conn.execute("DELETE FROM tasks WHERE id = ?", (record_id,))
+        if cursor.rowcount == 0:
+            send_json(self, 404, {"error": "Not found."})
+            return
+        send_json(self, 200, {"id": record_id, "deleted": True})
+
+    def delete_vendor(self, record_id):
+        archived_at = datetime.utcnow().isoformat(timespec="seconds")
+        with get_db() as conn:
+            has_purchases = conn.execute(
+                "SELECT 1 FROM material_purchases WHERE vendor_id = ? LIMIT 1",
+                (record_id,),
+            ).fetchone()
+            if has_purchases:
+                cursor = conn.execute(
+                    "UPDATE vendors SET archived_at = ? WHERE id = ?",
+                    (archived_at, record_id),
+                )
+                if cursor.rowcount == 0:
+                    send_json(self, 404, {"error": "Not found."})
+                    return
+                send_json(self, 200, {"id": record_id, "archived": True})
+                return
+            cursor = conn.execute("DELETE FROM vendors WHERE id = ?", (record_id,))
+        if cursor.rowcount == 0:
+            send_json(self, 404, {"error": "Not found."})
+            return
+        send_json(self, 200, {"id": record_id, "deleted": True})
+
+    def delete_material_purchase(self, record_id):
+        with get_db() as conn:
+            cursor = conn.execute("DELETE FROM material_purchases WHERE id = ?", (record_id,))
+        if cursor.rowcount == 0:
+            send_json(self, 404, {"error": "Not found."})
+            return
+        send_json(self, 200, {"id": record_id, "deleted": True})
+
+    def delete_laborer(self, record_id):
+        archived_at = datetime.utcnow().isoformat(timespec="seconds")
+        with get_db() as conn:
+            has_entries = conn.execute(
+                "SELECT 1 FROM work_session_entries WHERE laborer_id = ? LIMIT 1",
+                (record_id,),
+            ).fetchone()
+            if has_entries:
+                cursor = conn.execute(
+                    "UPDATE laborers SET archived_at = ? WHERE id = ?",
+                    (archived_at, record_id),
+                )
+                if cursor.rowcount == 0:
+                    send_json(self, 404, {"error": "Not found."})
+                    return
+                send_json(self, 200, {"id": record_id, "archived": True})
+                return
+            cursor = conn.execute("DELETE FROM laborers WHERE id = ?", (record_id,))
+        if cursor.rowcount == 0:
+            send_json(self, 404, {"error": "Not found."})
+            return
+        send_json(self, 200, {"id": record_id, "deleted": True})
+
+    def delete_work_session(self, record_id):
+        with get_db() as conn:
+            cursor = conn.execute("DELETE FROM work_sessions WHERE id = ?", (record_id,))
+        if cursor.rowcount == 0:
+            send_json(self, 404, {"error": "Not found."})
+            return
+        send_json(self, 200, {"id": record_id, "deleted": True})
+
     def handle_work_sessions_list(self, query, page, page_size, include_archived):
         filters = [
             ("project_id", "ws.project_id", "int"),
@@ -1209,6 +1393,22 @@ class RenovationHandler(BaseHTTPRequestHandler):
                 "total_pages": total_pages,
             },
         )
+
+    def parse_resource_id(self, path):
+        parts = path.strip("/").split("/")
+        if len(parts) != 2:
+            send_json(self, 404, {"error": "Not found."})
+            return None, None
+        resource, raw_id = parts
+        if not resource:
+            send_json(self, 404, {"error": "Not found."})
+            return None, None
+        try:
+            record_id = int(raw_id)
+        except ValueError:
+            send_json(self, 400, {"error": "Invalid id."})
+            return None, None
+        return resource, record_id
 
     def log_message(self, format, *args):
         LOGGER.info(
