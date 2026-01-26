@@ -11,6 +11,7 @@ from urllib.parse import parse_qs, urlparse
 DB_PATH = os.environ.get("RENOVATION_DB", "renovation.db")
 API_AUTH_SECRET = os.environ.get("RENOVATION_API_KEY")
 MAX_CONTENT_LENGTH = int(os.environ.get("MAX_CONTENT_LENGTH", str(2 * 1024 * 1024)))
+MAX_PAGE_SIZE = int(os.environ.get("MAX_PAGE_SIZE", "100"))
 SERVER_TIMEOUT = float(os.environ.get("SERVER_TIMEOUT", "10"))
 LOG_LEVEL = os.environ.get("LOG_LEVEL", "INFO").upper()
 
@@ -152,22 +153,29 @@ def ensure_non_negative(value, field):
 def parse_pagination(query):
     params = parse_qs(query)
 
-    def parse_int(name, default, minimum):
+    def parse_int(name, default, minimum, maximum=None):
         if name not in params:
             return default
         values = params[name]
         if len(values) != 1 or not values[0]:
-            raise ValueError(f"{name} must be an integer of at least {minimum}.")
+            raise ValueError(build_pagination_error(name, minimum, maximum))
         try:
             number = int(values[0])
         except ValueError:
-            raise ValueError(f"{name} must be an integer of at least {minimum}.")
+            raise ValueError(build_pagination_error(name, minimum, maximum))
         if number < minimum:
-            raise ValueError(f"{name} must be an integer of at least {minimum}.")
+            raise ValueError(build_pagination_error(name, minimum, maximum))
+        if maximum is not None and number > maximum:
+            raise ValueError(build_pagination_error(name, minimum, maximum))
         return number
 
+    def build_pagination_error(name, minimum, maximum):
+        if maximum is None:
+            return f"{name} must be an integer of at least {minimum}."
+        return f"{name} must be between {minimum} and {maximum}."
+
     page = parse_int("page", 1, 1)
-    page_size = parse_int("page_size", 25, 1)
+    page_size = parse_int("page_size", 25, 1, MAX_PAGE_SIZE)
     limit = page_size
     offset = (page - 1) * page_size
     return page, page_size, limit, offset

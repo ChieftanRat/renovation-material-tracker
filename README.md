@@ -55,6 +55,7 @@ Environment variables:
 - `LOG_LEVEL` to control logging verbosity (defaults to `INFO`).
 - `RENOVATION_API_KEY` to require an API key or bearer token for POST requests.
 - `MAX_CONTENT_LENGTH` to cap JSON request bodies in bytes (default 2097152 / 2 MB).
+- `MAX_PAGE_SIZE` to cap `page_size` query values for pagination (default 100).
 - `SERVER_TIMEOUT` to set the server socket timeout in seconds (default 10).
 
 For production deployments, set `HOST=0.0.0.0` (or an explicit interface) only when you intend to expose the service, and keep it behind a reverse proxy or firewall. The default `127.0.0.1` bind keeps the API limited to local requests for safer development by default.
@@ -95,6 +96,8 @@ curl "http://localhost:8000/laborers?limit=10&offset=0"
 ```sh
 curl "http://localhost:8000/work-sessions?limit=10&offset=0"
 ```
+
+Pagination caps: `page_size` must be between 1 and the configured `MAX_PAGE_SIZE` (default 100). Requests above the cap return HTTP 400 with an explanatory error message.
 
 ## Next Steps
 
