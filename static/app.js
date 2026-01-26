@@ -1,6 +1,10 @@
 const API_BASE = window.location.origin;
 
-const API_KEY_STORAGE = "rmt_api_key";
+const API_KEY_STORAGE = {
+  session: "rmt_api_key_session",
+  local: "rmt_api_key",
+  remember: "rmt_api_key_remember",
+};
 
 const RESOURCES = [
   {
@@ -155,6 +159,7 @@ const state = {
 const ui = {
   serverBase: document.getElementById("server-base"),
   apiKeyInput: document.getElementById("api-key"),
+  rememberApiKey: document.getElementById("remember-api-key"),
   projectList: document.getElementById("project-list"),
   projectSearch: document.getElementById("project-search"),
   projectTitle: document.getElementById("project-title"),
@@ -200,16 +205,38 @@ const ui = {
 
 ui.serverBase.textContent = API_BASE;
 
+function getRememberPreference() {
+  return localStorage.getItem(API_KEY_STORAGE.remember) === "true";
+}
+
+function setRememberPreference(value) {
+  localStorage.setItem(API_KEY_STORAGE.remember, value ? "true" : "false");
+}
+
 function getApiKey() {
-  return localStorage.getItem(API_KEY_STORAGE) || "";
+  const sessionValue = sessionStorage.getItem(API_KEY_STORAGE.session);
+  if (sessionValue) {
+    return sessionValue;
+  }
+  if (getRememberPreference()) {
+    return localStorage.getItem(API_KEY_STORAGE.local) || "";
+  }
+  return "";
 }
 
 function setApiKey(value) {
   const trimmed = value.trim();
+  const remember = getRememberPreference();
   if (trimmed) {
-    localStorage.setItem(API_KEY_STORAGE, trimmed);
+    sessionStorage.setItem(API_KEY_STORAGE.session, trimmed);
+    if (remember) {
+      localStorage.setItem(API_KEY_STORAGE.local, trimmed);
+    } else {
+      localStorage.removeItem(API_KEY_STORAGE.local);
+    }
   } else {
-    localStorage.removeItem(API_KEY_STORAGE);
+    sessionStorage.removeItem(API_KEY_STORAGE.session);
+    localStorage.removeItem(API_KEY_STORAGE.local);
   }
 }
 
@@ -1687,6 +1714,31 @@ ui.refreshAll.addEventListener("click", async () => {
   updateProjectSummary();
   loadList();
 });
+
+const rememberPreference = getRememberPreference();
+if (!rememberPreference) {
+  const legacyKey = localStorage.getItem(API_KEY_STORAGE.local);
+  if (legacyKey) {
+    sessionStorage.setItem(API_KEY_STORAGE.session, legacyKey);
+    localStorage.removeItem(API_KEY_STORAGE.local);
+  }
+}
+
+if (ui.rememberApiKey) {
+  ui.rememberApiKey.checked = rememberPreference;
+  ui.rememberApiKey.addEventListener("change", () => {
+    const shouldRemember = ui.rememberApiKey.checked;
+    setRememberPreference(shouldRemember);
+    if (!shouldRemember) {
+      localStorage.removeItem(API_KEY_STORAGE.local);
+      return;
+    }
+    const sessionKey = sessionStorage.getItem(API_KEY_STORAGE.session);
+    if (sessionKey) {
+      localStorage.setItem(API_KEY_STORAGE.local, sessionKey);
+    }
+  });
+}
 
 if (ui.apiKeyInput) {
   ui.apiKeyInput.value = getApiKey();
