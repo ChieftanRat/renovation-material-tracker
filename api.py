@@ -84,9 +84,10 @@ def send_json(handler, status, payload):
 
 def require_auth(handler):
     if not API_AUTH_SECRET:
-        LOGGER.error("RENOVATION_API_KEY is not configured.")
-        send_json(handler, 403, {"error": "API key not configured."})
-        return False
+        LOGGER.warning(
+            "RENOVATION_API_KEY is not configured; allowing request without auth."
+        )
+        return True
     api_key = handler.headers.get("X-API-Key")
     auth_header = handler.headers.get("Authorization", "")
     bearer = None
