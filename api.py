@@ -1,3 +1,4 @@
+import hmac
 import json
 import logging
 import mimetypes
@@ -169,7 +170,11 @@ def require_auth(handler):
     if not api_key and not bearer and not cookie_value:
         send_json(handler, 401, {"error": "Authentication required."})
         return False
-    if api_key == api_key_secret or bearer == api_key_secret or cookie_value == api_key_secret:
+    if (
+        (api_key and hmac.compare_digest(api_key, api_key_secret))
+        or (bearer and hmac.compare_digest(bearer, api_key_secret))
+        or (cookie_value and hmac.compare_digest(cookie_value, api_key_secret))
+    ):
         return True
     send_json(handler, 403, {"error": "Invalid credentials."})
     return False
