@@ -164,6 +164,10 @@ def send_json(handler, status, payload):
     LOGGER.info("%s %s -> %s", handler.command, handler.path, status)
 
 
+def matches(candidate: str | None, secret: str) -> bool:
+    return bool(candidate) and hmac.compare_digest(candidate, secret)
+
+
 def require_auth(handler):
     api_key_secret = ensure_api_auth_secret()
     if not api_key_secret:
