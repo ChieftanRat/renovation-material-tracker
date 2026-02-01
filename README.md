@@ -107,6 +107,7 @@ Pagination caps: `page_size` must be between 1 and the configured `MAX_PAGE_SIZE
 ## Quick Start (Windows)
 
 Double-click `start.bat` to launch the API and open the UI in your browser.
+`start.bat` sets `RENOVATION_API_KEY` to a default value; update it to your own secret key before sharing the API.
 
 ## Backup Export
 
