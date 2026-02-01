@@ -3,7 +3,11 @@ const API_BASE =
   window.location.origin && window.location.origin !== "null"
     ? window.location.origin
     : DEFAULT_API_BASE;
-const IS_SAME_ORIGIN = API_BASE === window.location.origin;
+const API_ORIGIN = new URL(API_BASE, window.location.origin).origin;
+const IS_SAME_ORIGIN = API_ORIGIN === window.location.origin;
+const Config = {
+  ALLOW_CROSS_ORIGIN_COOKIE_AUTH: false,
+};
 
 const API_KEY_STORAGE = {
   local: "rmt_api_key",
@@ -316,12 +320,30 @@ function buildApiUrl(path) {
 async function fetchJson(url, options = {}) {
   const requestOptions = { ...options };
   const method = (requestOptions.method || "GET").toUpperCase();
+  const isMutation = method !== "GET" && method !== "HEAD";
   const headers = new Headers(requestOptions.headers || {});
   const apiKey = getApiKey();
   if (apiKey && !headers.has("X-API-Key") && !headers.has("Authorization")) {
     headers.set("X-API-Key", apiKey);
   }
   requestOptions.headers = headers;
+  if (IS_SAME_ORIGIN) {
+    requestOptions.credentials = "same-origin";
+  } else if (Config.ALLOW_CROSS_ORIGIN_COOKIE_AUTH) {
+    requestOptions.credentials = "include";
+  } else {
+    requestOptions.credentials = "omit";
+    if (
+      isMutation &&
+      !headers.has("X-API-Key") &&
+      !headers.has("Authorization")
+    ) {
+      const message =
+        "Cross-origin API requests require an explicit header-based API key when cookie-based cross-origin authentication is not enabled.";
+      showToast(message, "error");
+      throw new Error(message);
+    }
+  }
   const response = await fetch(buildApiUrl(url), requestOptions);
   const payload = await response.json();
   if (!response.ok) {
