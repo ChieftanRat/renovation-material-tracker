@@ -1,4 +1,8 @@
-const API_BASE = window.location.origin;
+const DEFAULT_API_BASE = "http://localhost:8000";
+const API_BASE =
+  window.location.origin && window.location.origin !== "null"
+    ? window.location.origin
+    : DEFAULT_API_BASE;
 
 const API_KEY_STORAGE = {
   session: "rmt_api_key_session",
@@ -262,18 +266,24 @@ function showSkeleton() {
   ui.tableWrap.appendChild(skeleton);
 }
 
+function buildApiUrl(path) {
+  if (path.startsWith("http://") || path.startsWith("https://")) {
+    return path;
+  }
+  const normalizedPath = path.startsWith("/") ? path : `/${path}`;
+  return `${API_BASE}${normalizedPath}`;
+}
+
 async function fetchJson(url, options = {}) {
   const requestOptions = { ...options };
   const method = (requestOptions.method || "GET").toUpperCase();
   const headers = new Headers(requestOptions.headers || {});
-  if (method !== "GET") {
-    const apiKey = getApiKey();
-    if (apiKey) {
-      headers.set("X-API-Key", apiKey);
-    }
+  const apiKey = getApiKey();
+  if (apiKey && !headers.has("X-API-Key") && !headers.has("Authorization")) {
+    headers.set("X-API-Key", apiKey);
   }
   requestOptions.headers = headers;
-  const response = await fetch(url, requestOptions);
+  const response = await fetch(buildApiUrl(url), requestOptions);
   const payload = await response.json();
   if (!response.ok) {
     if (response.status === 401 || response.status === 403) {
