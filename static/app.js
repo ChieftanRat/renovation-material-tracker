@@ -5,10 +5,11 @@ const API_BASE =
     : DEFAULT_API_BASE;
 
 const API_KEY_STORAGE = {
-  session: "rmt_api_key_session",
   local: "rmt_api_key",
   remember: "rmt_api_key_remember",
 };
+
+let ephemeralApiKey = "";
 
 const RESOURCES = [
   {
@@ -218,28 +219,23 @@ function setRememberPreference(value) {
 }
 
 function getApiKey() {
-  const sessionValue = sessionStorage.getItem(API_KEY_STORAGE.session);
-  if (sessionValue) {
-    return sessionValue;
-  }
   if (getRememberPreference()) {
     return localStorage.getItem(API_KEY_STORAGE.local) || "";
   }
-  return "";
+  return ephemeralApiKey;
 }
 
 function setApiKey(value) {
   const trimmed = value.trim();
   const remember = getRememberPreference();
+  ephemeralApiKey = trimmed;
   if (trimmed) {
-    sessionStorage.setItem(API_KEY_STORAGE.session, trimmed);
     if (remember) {
       localStorage.setItem(API_KEY_STORAGE.local, trimmed);
     } else {
       localStorage.removeItem(API_KEY_STORAGE.local);
     }
   } else {
-    sessionStorage.removeItem(API_KEY_STORAGE.session);
     localStorage.removeItem(API_KEY_STORAGE.local);
   }
 }
@@ -1726,13 +1722,6 @@ ui.refreshAll.addEventListener("click", async () => {
 });
 
 const rememberPreference = getRememberPreference();
-if (!rememberPreference) {
-  const legacyKey = localStorage.getItem(API_KEY_STORAGE.local);
-  if (legacyKey) {
-    sessionStorage.setItem(API_KEY_STORAGE.session, legacyKey);
-    localStorage.removeItem(API_KEY_STORAGE.local);
-  }
-}
 
 if (ui.rememberApiKey) {
   ui.rememberApiKey.checked = rememberPreference;
@@ -1740,18 +1729,21 @@ if (ui.rememberApiKey) {
     const shouldRemember = ui.rememberApiKey.checked;
     setRememberPreference(shouldRemember);
     if (!shouldRemember) {
+      ephemeralApiKey = ui.apiKeyInput
+        ? ui.apiKeyInput.value.trim()
+        : ephemeralApiKey;
       localStorage.removeItem(API_KEY_STORAGE.local);
       return;
     }
-    const sessionKey = sessionStorage.getItem(API_KEY_STORAGE.session);
-    if (sessionKey) {
-      localStorage.setItem(API_KEY_STORAGE.local, sessionKey);
+    if (ephemeralApiKey) {
+      localStorage.setItem(API_KEY_STORAGE.local, ephemeralApiKey);
     }
   });
 }
 
 if (ui.apiKeyInput) {
-  ui.apiKeyInput.value = getApiKey();
+  ephemeralApiKey = getApiKey();
+  ui.apiKeyInput.value = ephemeralApiKey;
   ui.apiKeyInput.addEventListener("change", (event) => {
     setApiKey(event.target.value);
     showToast("API key saved.");
