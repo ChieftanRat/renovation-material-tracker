@@ -528,10 +528,10 @@ async function loadList() {
 
 async function refreshLookups() {
   const [projects, tasks, vendors, laborers] = await Promise.all([
-    fetchJson("/projects?page=1&page_size=200").then((payload) => payload.data),
-    fetchJson("/tasks?page=1&page_size=200").then((payload) => payload.data),
-    fetchJson("/vendors?page=1&page_size=200").then((payload) => payload.data),
-    fetchJson("/laborers?page=1&page_size=200").then((payload) => payload.data),
+    fetchJson("/projects?page=1&page_size=100").then((payload) => payload.data),
+    fetchJson("/tasks?page=1&page_size=100").then((payload) => payload.data),
+    fetchJson("/vendors?page=1&page_size=100").then((payload) => payload.data),
+    fetchJson("/laborers?page=1&page_size=100").then((payload) => payload.data),
   ]);
   state.lookups = { projects, tasks, vendors, laborers };
   if (state.selectedProjectId) {
