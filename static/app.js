@@ -3,6 +3,7 @@ const API_BASE =
   window.location.origin && window.location.origin !== "null"
     ? window.location.origin
     : DEFAULT_API_BASE;
+const IS_SAME_ORIGIN = API_BASE === window.location.origin;
 
 const API_KEY_STORAGE = {
   local: "rmt_api_key",
@@ -10,6 +11,7 @@ const API_KEY_STORAGE = {
 };
 
 let ephemeralApiKey = "";
+let rememberPreference = false;
 
 const RESOURCES = [
   {
@@ -211,14 +213,40 @@ const ui = {
 ui.serverBase.textContent = API_BASE;
 
 function getRememberPreference() {
+  if (IS_SAME_ORIGIN) {
+    return rememberPreference;
+  }
   return localStorage.getItem(API_KEY_STORAGE.remember) === "true";
 }
 
 function setRememberPreference(value) {
+  rememberPreference = value;
+  if (IS_SAME_ORIGIN) {
+    if (value) {
+      if (ephemeralApiKey) {
+        localStorage.setItem(API_KEY_STORAGE.remember, "true");
+        localStorage.setItem(API_KEY_STORAGE.local, ephemeralApiKey);
+      }
+      return;
+    }
+    localStorage.removeItem(API_KEY_STORAGE.remember);
+    localStorage.removeItem(API_KEY_STORAGE.local);
+    return;
+  }
   localStorage.setItem(API_KEY_STORAGE.remember, value ? "true" : "false");
 }
 
+function canWriteApiKeyStorage({ apiKey = ephemeralApiKey, remember } = {}) {
+  if (!IS_SAME_ORIGIN) {
+    return true;
+  }
+  return Boolean(apiKey && remember);
+}
+
 function getApiKey() {
+  if (IS_SAME_ORIGIN) {
+    return ephemeralApiKey;
+  }
   if (getRememberPreference()) {
     return localStorage.getItem(API_KEY_STORAGE.local) || "";
   }
@@ -229,14 +257,29 @@ function setApiKey(value) {
   const trimmed = value.trim();
   const remember = getRememberPreference();
   ephemeralApiKey = trimmed;
+  if (!canWriteApiKeyStorage({ apiKey: trimmed, remember })) {
+    return;
+  }
+  localStorage.setItem(API_KEY_STORAGE.remember, remember ? "true" : "false");
   if (trimmed) {
-    if (remember) {
-      localStorage.setItem(API_KEY_STORAGE.local, trimmed);
-    } else {
-      localStorage.removeItem(API_KEY_STORAGE.local);
-    }
+    localStorage.setItem(API_KEY_STORAGE.local, trimmed);
   } else {
     localStorage.removeItem(API_KEY_STORAGE.local);
+  }
+}
+
+function hydrateApiKeyState() {
+  if (!IS_SAME_ORIGIN) {
+    return;
+  }
+  const storedRemember =
+    localStorage.getItem(API_KEY_STORAGE.remember) === "true";
+  const storedKey = localStorage.getItem(API_KEY_STORAGE.local) || "";
+  if (storedRemember && storedKey) {
+    rememberPreference = true;
+    ephemeralApiKey = storedKey;
+  } else {
+    rememberPreference = false;
   }
 }
 
@@ -1721,10 +1764,12 @@ ui.refreshAll.addEventListener("click", async () => {
   loadList();
 });
 
-const rememberPreference = getRememberPreference();
+hydrateApiKeyState();
+rememberPreference = getRememberPreference();
+const initialRememberPreference = rememberPreference;
 
 if (ui.rememberApiKey) {
-  ui.rememberApiKey.checked = rememberPreference;
+  ui.rememberApiKey.checked = initialRememberPreference;
   ui.rememberApiKey.addEventListener("change", () => {
     const shouldRemember = ui.rememberApiKey.checked;
     setRememberPreference(shouldRemember);
@@ -1732,11 +1777,22 @@ if (ui.rememberApiKey) {
       ephemeralApiKey = ui.apiKeyInput
         ? ui.apiKeyInput.value.trim()
         : ephemeralApiKey;
-      localStorage.removeItem(API_KEY_STORAGE.local);
+      if (canWriteApiKeyStorage({ apiKey: "", remember: false })) {
+        localStorage.removeItem(API_KEY_STORAGE.local);
+        localStorage.removeItem(API_KEY_STORAGE.remember);
+      }
       return;
     }
-    if (ephemeralApiKey) {
-      localStorage.setItem(API_KEY_STORAGE.local, ephemeralApiKey);
+    if (
+      canWriteApiKeyStorage({
+        apiKey: ephemeralApiKey,
+        remember: shouldRemember,
+      })
+    ) {
+      if (ephemeralApiKey) {
+        localStorage.setItem(API_KEY_STORAGE.local, ephemeralApiKey);
+        localStorage.setItem(API_KEY_STORAGE.remember, "true");
+      }
     }
   });
 }
