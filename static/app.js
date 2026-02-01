@@ -320,6 +320,7 @@ function buildApiUrl(path) {
 async function fetchJson(url, options = {}) {
   const requestOptions = { ...options };
   const method = (requestOptions.method || "GET").toUpperCase();
+  const isMutation = method !== "GET" && method !== "HEAD";
   const headers = new Headers(requestOptions.headers || {});
   const apiKey = getApiKey();
   if (apiKey && !headers.has("X-API-Key") && !headers.has("Authorization")) {
@@ -332,7 +333,11 @@ async function fetchJson(url, options = {}) {
     requestOptions.credentials = "include";
   } else {
     requestOptions.credentials = "omit";
-    if (!headers.has("X-API-Key") && !headers.has("Authorization")) {
+    if (
+      isMutation &&
+      !headers.has("X-API-Key") &&
+      !headers.has("Authorization")
+    ) {
       const message =
         "Cross-origin API requests require an explicit header-based API key when cookie-based cross-origin authentication is not enabled.";
       showToast(message, "error");
