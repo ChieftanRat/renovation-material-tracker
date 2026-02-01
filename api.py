@@ -2,7 +2,9 @@ import json
 import logging
 import mimetypes
 import os
+import secrets
 import sqlite3
+import sys
 from datetime import date, datetime, time, timedelta
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -11,10 +13,9 @@ from urllib.parse import parse_qs, urlparse
 
 DB_PATH = os.environ.get("RENOVATION_DB", "renovation.db")
 API_AUTH_SECRET = os.environ.get("RENOVATION_API_KEY")
-ALLOW_UNAUTHENTICATED = os.environ.get("RENOVATION_ALLOW_UNAUTHENTICATED", "").lower() in (
-    "1",
-    "true",
-    "yes",
+API_KEY_PATH = os.environ.get(
+    "RENOVATION_API_KEY_PATH",
+    os.path.join(os.path.dirname(__file__), ".secrets", "api_key"),
 )
 MAX_CONTENT_LENGTH = int(os.environ.get("MAX_CONTENT_LENGTH", str(2 * 1024 * 1024)))
 MAX_PAGE_SIZE = int(os.environ.get("MAX_PAGE_SIZE", "100"))
@@ -42,6 +43,73 @@ BASE_DIR = os.path.dirname(__file__)
 BACKUP_DIR = os.path.join(BASE_DIR, "backups")
 SCHEMA_PATH = os.path.join(BASE_DIR, "schema.sql")
 SEED_PATH = os.path.join(BASE_DIR, "seed.sql")
+
+
+def generate_api_key():
+    return secrets.token_hex(32)
+
+
+def load_persisted_api_key(path):
+    try:
+        with open(path, "r", encoding="utf-8") as handle:
+            value = handle.read().strip()
+    except FileNotFoundError:
+        return None
+    except OSError as exc:
+        raise RuntimeError(f"Failed to read API key from {path}: {exc}") from exc
+    if not value:
+        raise RuntimeError(f"API key file {path} is empty.")
+    if len(value) < 64:
+        raise RuntimeError(f"API key file {path} does not contain a valid key.")
+    return value
+
+
+def persist_api_key(path, value):
+    directory = os.path.dirname(path)
+    try:
+        os.makedirs(directory, exist_ok=True)
+        with open(path, "x", encoding="utf-8") as handle:
+            handle.write(value)
+        try:
+            os.chmod(path, 0o600)
+        except OSError:
+            LOGGER.warning("Unable to set permissions on API key file %s", path)
+    except FileExistsError:
+        return
+    except OSError as exc:
+        raise RuntimeError(f"Failed to persist API key to {path}: {exc}") from exc
+
+
+def initialize_api_key():
+    if API_AUTH_SECRET:
+        return API_AUTH_SECRET
+    persisted = load_persisted_api_key(API_KEY_PATH)
+    if persisted:
+        return persisted
+    generated = generate_api_key()
+    persist_api_key(API_KEY_PATH, generated)
+    return generated
+
+
+def ensure_api_auth_secret():
+    global API_AUTH_SECRET
+    if API_AUTH_SECRET:
+        return API_AUTH_SECRET
+    try:
+        API_AUTH_SECRET = initialize_api_key()
+        return API_AUTH_SECRET
+    except RuntimeError as exc:
+        raise SystemExit(str(exc)) from exc
+
+
+def get_cookie_value(cookie_header, name):
+    for part in cookie_header.split(";"):
+        if "=" not in part:
+            continue
+        key, value = part.strip().split("=", 1)
+        if key == name:
+            return value
+    return None
 
 
 def get_db():
@@ -88,25 +156,20 @@ def send_json(handler, status, payload):
 
 
 def require_auth(handler):
-    if not API_AUTH_SECRET:
-        if ALLOW_UNAUTHENTICATED:
-            LOGGER.warning(
-                "RENOVATION_API_KEY is not configured; allowing request without auth "
-                "because RENOVATION_ALLOW_UNAUTHENTICATED is set."
-            )
-            return True
-        LOGGER.error("RENOVATION_API_KEY is not configured; denying request.")
-        send_json(handler, 403, {"error": "Authentication is not configured."})
+    api_key_secret = ensure_api_auth_secret()
+    if not api_key_secret:
+        send_json(handler, 500, {"error": "Authentication is not configured."})
         return False
     api_key = handler.headers.get("X-API-Key")
     auth_header = handler.headers.get("Authorization", "")
+    cookie_value = get_cookie_value(handler.headers.get("Cookie", ""), "rmt_api_key")
     bearer = None
     if auth_header.lower().startswith("bearer "):
         bearer = auth_header[7:].strip()
-    if not api_key and not bearer:
+    if not api_key and not bearer and not cookie_value:
         send_json(handler, 401, {"error": "Authentication required."})
         return False
-    if api_key == API_AUTH_SECRET or bearer == API_AUTH_SECRET:
+    if api_key == api_key_secret or bearer == api_key_secret or cookie_value == api_key_secret:
         return True
     send_json(handler, 403, {"error": "Invalid credentials."})
     return False
@@ -116,10 +179,13 @@ def require_mutation_auth(handler):
     return require_auth(handler)
 
 
-def send_file(handler, status, content, content_type):
+def send_file(handler, status, content, content_type, extra_headers=None):
     handler.send_response(status)
     handler.send_header("Content-Type", content_type)
     handler.send_header("Content-Length", str(len(content)))
+    if extra_headers:
+        for header, value in extra_headers.items():
+            handler.send_header(header, value)
     handler.end_headers()
     handler.wfile.write(content)
 
@@ -366,7 +432,7 @@ class RenovationHandler(BaseHTTPRequestHandler):
     def do_GET(self):
         parsed = urlparse(self.path)
         if parsed.path == "/":
-            self.serve_static_file("index.html")
+            self.serve_index()
             return
         if parsed.path == "/favicon.ico":
             self.send_response(204)
@@ -441,6 +507,28 @@ class RenovationHandler(BaseHTTPRequestHandler):
             LOGGER.info("%s %s -> %s", self.command, self.path, 200)
         except OSError:
             LOGGER.exception("Failed to read static file %s", requested_path)
+            send_json(self, 500, {"error": "Unexpected server error."})
+
+    def serve_index(self):
+        static_root = os.path.join(os.path.dirname(__file__), "static")
+        index_path = os.path.join(static_root, "index.html")
+        try:
+            with open(index_path, "rb") as handle:
+                content = handle.read()
+            api_key = ensure_api_auth_secret()
+            cookie = f"rmt_api_key={api_key}; Path=/; SameSite=Strict; HttpOnly"
+            send_file(
+                self,
+                200,
+                content,
+                "text/html",
+                extra_headers={"Set-Cookie": cookie},
+            )
+            LOGGER.info("%s %s -> %s", self.command, self.path, 200)
+        except SystemExit:
+            raise
+        except Exception:
+            LOGGER.exception("Failed to read index file %s", index_path)
             send_json(self, 500, {"error": "Unexpected server error."})
 
     def do_POST(self):
@@ -1521,6 +1609,7 @@ class RenovationHandler(BaseHTTPRequestHandler):
 def run():
     host = os.environ.get("HOST", "127.0.0.1")
     port = int(os.environ.get("PORT", "8000"))
+    ensure_api_auth_secret()
     server = ThreadingHTTPServer((host, port), RenovationHandler)
     server.timeout = SERVER_TIMEOUT
     server.socket.settimeout(SERVER_TIMEOUT)
