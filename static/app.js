@@ -3,12 +3,19 @@ const API_BASE =
   window.location.origin && window.location.origin !== "null"
     ? window.location.origin
     : DEFAULT_API_BASE;
+const API_ORIGIN = new URL(API_BASE, window.location.origin).origin;
+const IS_SAME_ORIGIN = API_ORIGIN === window.location.origin;
+const Config = {
+  ALLOW_CROSS_ORIGIN_COOKIE_AUTH: false,
+};
 
 const API_KEY_STORAGE = {
-  session: "rmt_api_key_session",
   local: "rmt_api_key",
   remember: "rmt_api_key_remember",
 };
+
+let ephemeralApiKey = "";
+let rememberPreference = false;
 
 const RESOURCES = [
   {
@@ -163,6 +170,7 @@ const state = {
 const ui = {
   serverBase: document.getElementById("server-base"),
   apiKeyInput: document.getElementById("api-key"),
+  apiKeyHelper: document.getElementById("api-key-helper"),
   rememberApiKey: document.getElementById("remember-api-key"),
   projectList: document.getElementById("project-list"),
   projectSearch: document.getElementById("project-search"),
@@ -208,39 +216,84 @@ const ui = {
 };
 
 ui.serverBase.textContent = API_BASE;
+if (ui.apiKeyHelper) {
+  if (Config.ALLOW_CROSS_ORIGIN_COOKIE_AUTH) {
+    ui.apiKeyHelper.textContent =
+      "For cross-origin access, a header-based API key is optional when cookie-based cross-origin authentication is enabled.";
+  } else {
+    ui.apiKeyHelper.textContent =
+      "Warning: Cross-origin access requires a header-based API key unless cookie-based cross-origin authentication is enabled.";
+  }
+}
 
 function getRememberPreference() {
+  if (IS_SAME_ORIGIN) {
+    return rememberPreference;
+  }
   return localStorage.getItem(API_KEY_STORAGE.remember) === "true";
 }
 
 function setRememberPreference(value) {
+  rememberPreference = value;
+  if (IS_SAME_ORIGIN) {
+    if (value) {
+      if (ephemeralApiKey) {
+        localStorage.setItem(API_KEY_STORAGE.remember, "true");
+        localStorage.setItem(API_KEY_STORAGE.local, ephemeralApiKey);
+      }
+      return;
+    }
+    localStorage.removeItem(API_KEY_STORAGE.remember);
+    localStorage.removeItem(API_KEY_STORAGE.local);
+    return;
+  }
   localStorage.setItem(API_KEY_STORAGE.remember, value ? "true" : "false");
 }
 
+function canWriteApiKeyStorage({ apiKey = ephemeralApiKey, remember } = {}) {
+  if (!IS_SAME_ORIGIN) {
+    return true;
+  }
+  return Boolean(apiKey && remember);
+}
+
 function getApiKey() {
-  const sessionValue = sessionStorage.getItem(API_KEY_STORAGE.session);
-  if (sessionValue) {
-    return sessionValue;
+  if (IS_SAME_ORIGIN) {
+    return ephemeralApiKey;
   }
   if (getRememberPreference()) {
     return localStorage.getItem(API_KEY_STORAGE.local) || "";
   }
-  return "";
+  return ephemeralApiKey;
 }
 
 function setApiKey(value) {
   const trimmed = value.trim();
   const remember = getRememberPreference();
+  ephemeralApiKey = trimmed;
+  if (!canWriteApiKeyStorage({ apiKey: trimmed, remember })) {
+    return;
+  }
+  localStorage.setItem(API_KEY_STORAGE.remember, remember ? "true" : "false");
   if (trimmed) {
-    sessionStorage.setItem(API_KEY_STORAGE.session, trimmed);
-    if (remember) {
-      localStorage.setItem(API_KEY_STORAGE.local, trimmed);
-    } else {
-      localStorage.removeItem(API_KEY_STORAGE.local);
-    }
+    localStorage.setItem(API_KEY_STORAGE.local, trimmed);
   } else {
-    sessionStorage.removeItem(API_KEY_STORAGE.session);
     localStorage.removeItem(API_KEY_STORAGE.local);
+  }
+}
+
+function hydrateApiKeyState() {
+  if (!IS_SAME_ORIGIN) {
+    return;
+  }
+  const storedRemember =
+    localStorage.getItem(API_KEY_STORAGE.remember) === "true";
+  const storedKey = localStorage.getItem(API_KEY_STORAGE.local) || "";
+  if (storedRemember && storedKey) {
+    rememberPreference = true;
+    ephemeralApiKey = storedKey;
+  } else {
+    rememberPreference = false;
   }
 }
 
@@ -274,19 +327,55 @@ function buildApiUrl(path) {
   return `${API_BASE}${normalizedPath}`;
 }
 
+function handleUnauthorizedResponse(payload, shouldShowGuidance) {
+  if (shouldShowGuidance) {
+    const message =
+      "Authentication failed. Cookie-based authentication requires accessing the application via the built-in server-served UI. For cross-origin access without server-side cookie configuration, an explicit API key must be provided in the request headers.";
+    showToast(message, "error");
+    return;
+  }
+  showToast(payload.error || "Authentication failed.", "error");
+}
+
 async function fetchJson(url, options = {}) {
   const requestOptions = { ...options };
   const method = (requestOptions.method || "GET").toUpperCase();
-  const headers = new Headers(requestOptions.headers || {});
+  const isMutation = method !== "GET" && method !== "HEAD";
+  const originalHeaders = new Headers(requestOptions.headers || {});
+  const hadExplicitAuthHeader =
+    originalHeaders.has("X-API-Key") || originalHeaders.has("Authorization");
+  const headers = new Headers(originalHeaders);
   const apiKey = getApiKey();
-  if (apiKey && !headers.has("X-API-Key") && !headers.has("Authorization")) {
+  const shouldAttachApiKey =
+    apiKey && !headers.has("X-API-Key") && !headers.has("Authorization");
+  if (shouldAttachApiKey) {
     headers.set("X-API-Key", apiKey);
   }
   requestOptions.headers = headers;
+  if (IS_SAME_ORIGIN) {
+    requestOptions.credentials = "same-origin";
+  } else if (Config.ALLOW_CROSS_ORIGIN_COOKIE_AUTH) {
+    requestOptions.credentials = "include";
+  } else {
+    requestOptions.credentials = "omit";
+    if (
+      isMutation &&
+      !headers.has("X-API-Key") &&
+      !headers.has("Authorization")
+    ) {
+      const message =
+        "Cross-origin API requests require an explicit header-based API key when cookie-based cross-origin authentication is not enabled.";
+      showToast(message, "error");
+      throw new Error(message);
+    }
+  }
   const response = await fetch(buildApiUrl(url), requestOptions);
   const payload = await response.json();
   if (!response.ok) {
-    if (response.status === 401 || response.status === 403) {
+    if (response.status === 401) {
+      const shouldShowGuidance = !hadExplicitAuthHeader && !shouldAttachApiKey;
+      handleUnauthorizedResponse(payload, shouldShowGuidance);
+    } else if (response.status === 403) {
       showToast(payload.error || "Authentication failed.", "error");
     }
     throw new Error(payload.error || "Request failed.");
@@ -1725,33 +1814,42 @@ ui.refreshAll.addEventListener("click", async () => {
   loadList();
 });
 
-const rememberPreference = getRememberPreference();
-if (!rememberPreference) {
-  const legacyKey = localStorage.getItem(API_KEY_STORAGE.local);
-  if (legacyKey) {
-    sessionStorage.setItem(API_KEY_STORAGE.session, legacyKey);
-    localStorage.removeItem(API_KEY_STORAGE.local);
-  }
-}
+hydrateApiKeyState();
+rememberPreference = getRememberPreference();
+const initialRememberPreference = rememberPreference;
 
 if (ui.rememberApiKey) {
-  ui.rememberApiKey.checked = rememberPreference;
+  ui.rememberApiKey.checked = initialRememberPreference;
   ui.rememberApiKey.addEventListener("change", () => {
     const shouldRemember = ui.rememberApiKey.checked;
     setRememberPreference(shouldRemember);
     if (!shouldRemember) {
-      localStorage.removeItem(API_KEY_STORAGE.local);
+      ephemeralApiKey = ui.apiKeyInput
+        ? ui.apiKeyInput.value.trim()
+        : ephemeralApiKey;
+      if (canWriteApiKeyStorage({ apiKey: "", remember: false })) {
+        localStorage.removeItem(API_KEY_STORAGE.local);
+        localStorage.removeItem(API_KEY_STORAGE.remember);
+      }
       return;
     }
-    const sessionKey = sessionStorage.getItem(API_KEY_STORAGE.session);
-    if (sessionKey) {
-      localStorage.setItem(API_KEY_STORAGE.local, sessionKey);
+    if (
+      canWriteApiKeyStorage({
+        apiKey: ephemeralApiKey,
+        remember: shouldRemember,
+      })
+    ) {
+      if (ephemeralApiKey) {
+        localStorage.setItem(API_KEY_STORAGE.local, ephemeralApiKey);
+        localStorage.setItem(API_KEY_STORAGE.remember, "true");
+      }
     }
   });
 }
 
 if (ui.apiKeyInput) {
-  ui.apiKeyInput.value = getApiKey();
+  ephemeralApiKey = getApiKey();
+  ui.apiKeyInput.value = ephemeralApiKey;
   ui.apiKeyInput.addEventListener("change", (event) => {
     setApiKey(event.target.value);
     showToast("API key saved.");

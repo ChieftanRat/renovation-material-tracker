@@ -22,18 +22,24 @@
           <span class="value" id="server-base"></span>
         </div>
         <div class="api-key-field">
-          <label class="label" for="api-key">API key</label>
-          <input
-            class="api-key-input"
-            id="api-key"
-            type="password"
-            autocomplete="off"
-            placeholder="Optional"
-          />
-          <label class="toggle">
-            <input type="checkbox" id="remember-api-key" />
-            <span>Remember on this device</span>
-          </label>
+          <div class="muted" id="api-key-helper">
+            Cross-origin access requires a header-based API key unless cookie-based cross-origin authentication is enabled.
+          </div>
+          <details>
+            <summary class="label">Advanced</summary>
+            <label class="label" for="api-key">API key</label>
+            <input
+              class="api-key-input"
+              id="api-key"
+              type="password"
+              autocomplete="off"
+              placeholder="Optional"
+            />
+            <label class="toggle">
+              <input type="checkbox" id="remember-api-key" />
+              <span>Remember on this device</span>
+            </label>
+          </details>
         </div>
       </div>
     </header>
