@@ -34,7 +34,15 @@ def parse_env_int(name, default):
         return default
 
 
+def parse_env_bool(name, default=False):
+    raw_value = os.environ.get(name)
+    if raw_value is None:
+        return default
+    return raw_value.strip().lower() in {"1", "true", "yes"}
+
+
 BACKUP_RETENTION_DAYS = parse_env_int("BACKUP_RETENTION_DAYS", 30)
+FORCE_SECURE_COOKIES = parse_env_bool("FORCE_SECURE_COOKIES", False)
 logging.basicConfig(
     level=getattr(logging, LOG_LEVEL, logging.INFO),
     format="%(asctime)s %(levelname)s %(name)s %(message)s",
@@ -521,7 +529,15 @@ class RenovationHandler(BaseHTTPRequestHandler):
             with open(index_path, "rb") as handle:
                 content = handle.read()
             api_key = ensure_api_auth_secret()
+            forwarded_proto = self.headers.get("X-Forwarded-Proto", "")
+            forwarded_ssl = self.headers.get("X-Forwarded-SSL", "")
+            is_https = (
+                forwarded_proto.lower() == "https"
+                or forwarded_ssl.lower() == "on"
+            )
             cookie = f"rmt_api_key={api_key}; Path=/; SameSite=Strict; HttpOnly"
+            if FORCE_SECURE_COOKIES or is_https:
+                cookie = f"{cookie}; Secure"
             send_file(
                 self,
                 200,
