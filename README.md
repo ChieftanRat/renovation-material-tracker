@@ -53,10 +53,13 @@ Environment variables:
 - `HOST` to control the bind address (defaults to `127.0.0.1`). Use `HOST=0.0.0.0` to expose the API outside the local machine (for example, inside containers).
 - `PORT` to change the listening port (default 8000).
 - `LOG_LEVEL` to control logging verbosity (defaults to `INFO`).
-- `RENOVATION_API_KEY` to require an API key or bearer token for POST requests; if unset, requests are allowed without authentication.
+- `RENOVATION_API_KEY` to override the auto-generated API key (useful for deployments where you manage secrets externally).
+- `RENOVATION_API_KEY_PATH` to override where the auto-generated API key is stored (defaults to `.secrets/api_key`).
 - `MAX_CONTENT_LENGTH` to cap JSON request bodies in bytes (default 2097152 / 2 MB).
 - `MAX_PAGE_SIZE` to cap `page_size` query values for pagination (default 100).
 - `SERVER_TIMEOUT` to set the server socket timeout in seconds (default 10).
+
+On first run, the API generates a cryptographically secure API key and stores it in `.secrets/api_key`. The UI receives the key automatically via an HTTP-only cookie, so no manual setup is required for local use.
 
 For production deployments, set `HOST=0.0.0.0` (or an explicit interface) only when you intend to expose the service, and keep it behind a reverse proxy or firewall. The default `127.0.0.1` bind keeps the API limited to local requests for safer development by default.
 Requests with a `Content-Length` larger than the configured `MAX_CONTENT_LENGTH` are rejected with HTTP 413 responses.
@@ -107,7 +110,7 @@ Pagination caps: `page_size` must be between 1 and the configured `MAX_PAGE_SIZE
 ## Quick Start (Windows)
 
 Double-click `start.bat` to launch the API and open the UI in your browser.
-If `RENOVATION_API_KEY` is not already set, `start.bat` assigns a default value; update it to your own secret key before sharing the API.
+The API generates and stores its own key automatically on first run, so no manual setup is needed for local use.
 
 ## Backup Export
 
