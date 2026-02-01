@@ -3,7 +3,12 @@ const API_BASE =
   window.location.origin && window.location.origin !== "null"
     ? window.location.origin
     : DEFAULT_API_BASE;
-const API_ORIGIN = new URL(API_BASE, window.location.origin).origin;
+let API_ORIGIN = "";
+try {
+  API_ORIGIN = new URL(API_BASE, window.location.href).origin;
+} catch (error) {
+  API_ORIGIN = API_BASE;
+}
 const IS_SAME_ORIGIN = API_ORIGIN === window.location.origin;
 const Config = {
   ALLOW_CROSS_ORIGIN_COOKIE_AUTH: false,
