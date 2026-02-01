@@ -317,8 +317,8 @@ function buildApiUrl(path) {
   return `${API_BASE}${normalizedPath}`;
 }
 
-function handleUnauthorizedResponse(payload, hadExplicitAuthHeader) {
-  if (!hadExplicitAuthHeader) {
+function handleUnauthorizedResponse(payload, shouldShowGuidance) {
+  if (shouldShowGuidance) {
     const message =
       "Authentication failed. Cookie-based authentication requires accessing the application via the built-in server-served UI. For cross-origin access without server-side cookie configuration, an explicit API key must be provided in the request headers.";
     showToast(message, "error");
@@ -336,7 +336,9 @@ async function fetchJson(url, options = {}) {
     originalHeaders.has("X-API-Key") || originalHeaders.has("Authorization");
   const headers = new Headers(originalHeaders);
   const apiKey = getApiKey();
-  if (apiKey && !headers.has("X-API-Key") && !headers.has("Authorization")) {
+  const shouldAttachApiKey =
+    apiKey && !headers.has("X-API-Key") && !headers.has("Authorization");
+  if (shouldAttachApiKey) {
     headers.set("X-API-Key", apiKey);
   }
   requestOptions.headers = headers;
@@ -361,7 +363,8 @@ async function fetchJson(url, options = {}) {
   const payload = await response.json();
   if (!response.ok) {
     if (response.status === 401) {
-      handleUnauthorizedResponse(payload, hadExplicitAuthHeader);
+      const shouldShowGuidance = !hadExplicitAuthHeader && !shouldAttachApiKey;
+      handleUnauthorizedResponse(payload, shouldShowGuidance);
     } else if (response.status === 403) {
       showToast(payload.error || "Authentication failed.", "error");
     }
