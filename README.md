@@ -53,7 +53,7 @@ Environment variables:
 - `HOST` to control the bind address (defaults to `127.0.0.1`). Use `HOST=0.0.0.0` to expose the API outside the local machine (for example, inside containers).
 - `PORT` to change the listening port (default 8000).
 - `LOG_LEVEL` to control logging verbosity (defaults to `INFO`).
-- `RENOVATION_API_KEY` to require an API key or bearer token for POST requests.
+- `RENOVATION_API_KEY` to require an API key or bearer token for POST requests; if unset, requests are allowed without authentication.
 - `MAX_CONTENT_LENGTH` to cap JSON request bodies in bytes (default 2097152 / 2 MB).
 - `MAX_PAGE_SIZE` to cap `page_size` query values for pagination (default 100).
 - `SERVER_TIMEOUT` to set the server socket timeout in seconds (default 10).

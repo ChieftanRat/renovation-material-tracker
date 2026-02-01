@@ -16,6 +16,8 @@ ALLOW_UNAUTHENTICATED = os.environ.get("RENOVATION_ALLOW_UNAUTHENTICATED", "").l
     "true",
     "yes",
 )
+if not API_AUTH_SECRET:
+    ALLOW_UNAUTHENTICATED = True
 MAX_CONTENT_LENGTH = int(os.environ.get("MAX_CONTENT_LENGTH", str(2 * 1024 * 1024)))
 MAX_PAGE_SIZE = int(os.environ.get("MAX_PAGE_SIZE", "100"))
 SERVER_TIMEOUT = float(os.environ.get("SERVER_TIMEOUT", "10"))
@@ -89,15 +91,10 @@ def send_json(handler, status, payload):
 
 def require_auth(handler):
     if not API_AUTH_SECRET:
-        if ALLOW_UNAUTHENTICATED:
-            LOGGER.warning(
-                "RENOVATION_API_KEY is not configured; allowing request without auth "
-                "because RENOVATION_ALLOW_UNAUTHENTICATED is set."
-            )
-            return True
-        LOGGER.error("RENOVATION_API_KEY is not configured; denying request.")
-        send_json(handler, 403, {"error": "Authentication is not configured."})
-        return False
+        LOGGER.warning(
+            "RENOVATION_API_KEY is not configured; allowing request without auth."
+        )
+        return True
     api_key = handler.headers.get("X-API-Key")
     auth_header = handler.headers.get("Authorization", "")
     bearer = None
