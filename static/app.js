@@ -170,6 +170,7 @@ const state = {
 const ui = {
   serverBase: document.getElementById("server-base"),
   apiKeyInput: document.getElementById("api-key"),
+  apiKeyHelper: document.getElementById("api-key-helper"),
   rememberApiKey: document.getElementById("remember-api-key"),
   projectList: document.getElementById("project-list"),
   projectSearch: document.getElementById("project-search"),
@@ -215,6 +216,15 @@ const ui = {
 };
 
 ui.serverBase.textContent = API_BASE;
+if (ui.apiKeyHelper) {
+  if (Config.ALLOW_CROSS_ORIGIN_COOKIE_AUTH) {
+    ui.apiKeyHelper.textContent =
+      "For cross-origin access, a header-based API key is optional when cookie-based cross-origin authentication is enabled.";
+  } else {
+    ui.apiKeyHelper.textContent =
+      "Warning: Cross-origin access requires a header-based API key unless cookie-based cross-origin authentication is enabled.";
+  }
+}
 
 function getRememberPreference() {
   if (IS_SAME_ORIGIN) {
